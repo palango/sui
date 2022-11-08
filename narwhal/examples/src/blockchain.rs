@@ -1,5 +1,5 @@
 use std::{
-    collections::{btree_map::Entry, BTreeMap},
+    collections::{btree_map::Entry, BTreeMap, VecDeque},
     hash::Hash,
 };
 
@@ -38,7 +38,10 @@ impl Block {
         }
     }
 
-    pub fn create_next_from_txn(&self, txs: &mut Vec<Transaction>) -> (Block, Vec<Transaction>) {
+    pub fn create_next_from_txn(
+        &self,
+        mut txs: VecDeque<Transaction>,
+    ) -> (Block, Vec<Transaction>) {
         let mut rejected_txs = vec![];
         let mut accepted_txs = vec![];
         let mut next_state = self.final_state.clone();
@@ -46,9 +49,7 @@ impl Block {
 
         // FIXME: Add tx ordering here
         while gas_used + TX_GAS_PRICE <= BLOCK_GAS_LIMIT {
-            if let Some(_) = txs.first() {
-                // FIXME: Ouch, this is ugly and not efficient
-                let tx = txs.remove(0);
+            if let Some(tx) = txs.pop_front() {
                 if next_state.apply_tx(&tx) {
                     gas_used += TX_GAS_PRICE;
                     accepted_txs.push(tx)
@@ -60,7 +61,7 @@ impl Block {
             }
         }
 
-        rejected_txs.append(txs);
+        rejected_txs.extend(txs);
         (
             Block {
                 number: self.number + 1,
@@ -188,7 +189,7 @@ mod tests {
     fn block_creation() {
         let genesis = Block::genesis();
 
-        let mut txs = vec![
+        let mut txs = VecDeque::from([
             Transaction::Transfer(Transfer {
                 from: None,
                 to: ALICE.to_string(),
@@ -209,9 +210,9 @@ mod tests {
                 to: ALICE.to_string(),
                 amount: 5_000,
             }),
-        ];
+        ]);
 
-        let (new_block, rejected_txs) = genesis.create_next_from_txn(&mut txs);
+        let (new_block, rejected_txs) = genesis.create_next_from_txn(txs);
 
         assert_eq!(new_block.number, 1);
         assert_eq!(new_block.final_state.balances.get(ALICE), Some(&6));
