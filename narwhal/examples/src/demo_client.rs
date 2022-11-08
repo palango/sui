@@ -20,6 +20,8 @@ pub mod narwhal {
     tonic::include_proto!("narwhal");
 }
 
+mod blockchain;
+
 /// DEMO CONSTANTS
 const PRIMARY_0_PUBLIC_KEY: &str = "Zy82aSpF8QghKE4wWvyIoTWyLetCuUSfk2gxHEtwdbg=";
 // Assumption that each transaction costs 1 gas to complete
