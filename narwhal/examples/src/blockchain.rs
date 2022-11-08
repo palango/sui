@@ -96,15 +96,19 @@ impl State {
             Transaction::Transfer(t) => {
                 let sender = t.from.clone().unwrap();
                 match self.balances.entry(sender) {
-                    Entry::Occupied(e) => {
+                    Entry::Occupied(mut sender_entry) => {
                         // Sender's balance to small
-                        if *e.get() < t.amount {
+                        let current_val = *sender_entry.get();
+                        if current_val < t.amount {
                             false
                         } else {
-                            self.balances
-                                .entry(t.to.clone())
-                                .and_modify(|e| *e += t.amount)
-                                .or_insert(t.amount);
+                            sender_entry.insert(current_val - t.amount);
+                            {
+                                self.balances
+                                    .entry(t.to.clone())
+                                    .and_modify(|e| *e += t.amount)
+                                    .or_insert(t.amount);
+                            }
                             true
                         }
                     }
@@ -113,5 +117,68 @@ impl State {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALICE: &str = "Alice";
+    const BOB: &str = "Bob";
+
+    #[test]
+    fn state_minting() {
+        let mut state = State::new();
+        let tx = Transaction::Transfer(Transfer {
+            from: None,
+            to: BOB.to_string(),
+            amount: 12345,
+        });
+
+        assert_eq!(state.balances.get(BOB), None);
+        assert!(state.apply_tx(&tx));
+        assert_eq!(state.balances.get(BOB), Some(&12345));
+    }
+
+    #[test]
+    fn state_transfer() {
+        let mut state = State::new();
+
+        // Alice has no balance
+        let tx = Transaction::Transfer(Transfer {
+            from: Some(ALICE.to_string()),
+            to: BOB.to_string(),
+            amount: 12345,
+        });
+        assert!(!state.apply_tx(&tx));
+
+        // Mint some tokens for Alice
+        let tx = Transaction::Transfer(Transfer {
+            from: None,
+            to: ALICE.to_string(),
+            amount: 100,
+        });
+        assert!(state.apply_tx(&tx));
+        assert_eq!(state.balances.get(ALICE), Some(&100));
+
+        // Alice has to little balance
+        let tx = Transaction::Transfer(Transfer {
+            from: Some(ALICE.to_string()),
+            to: BOB.to_string(),
+            amount: 200,
+        });
+        assert!(!state.apply_tx(&tx));
+        assert_eq!(state.balances.get(ALICE), Some(&100));
+
+        // Alice can transfer
+        let tx = Transaction::Transfer(Transfer {
+            from: Some(ALICE.to_string()),
+            to: BOB.to_string(),
+            amount: 99,
+        });
+        assert!(state.apply_tx(&tx));
+        assert_eq!(state.balances.get(ALICE), Some(&1));
+        assert_eq!(state.balances.get(BOB), Some(&99));
     }
 }
