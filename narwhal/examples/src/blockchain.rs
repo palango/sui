@@ -46,12 +46,14 @@ impl Block {
 
         // FIXME: Add tx ordering here
         while gas_used + TX_GAS_PRICE <= BLOCK_GAS_LIMIT {
-            if let Some(tx) = txs.first_mut() {
-                if next_state.apply_tx(tx) {
+            if let Some(_) = txs.first() {
+                // FIXME: Ouch, this is ugly and not efficient
+                let tx = txs.remove(0);
+                if next_state.apply_tx(&tx) {
                     gas_used += TX_GAS_PRICE;
-                    accepted_txs.push(tx.clone())
+                    accepted_txs.push(tx)
                 } else {
-                    rejected_txs.push(tx.clone());
+                    rejected_txs.push(tx);
                 }
             } else {
                 break;
@@ -180,5 +182,41 @@ mod tests {
         assert!(state.apply_tx(&tx));
         assert_eq!(state.balances.get(ALICE), Some(&1));
         assert_eq!(state.balances.get(BOB), Some(&99));
+    }
+
+    #[test]
+    fn block_creation() {
+        let genesis = Block::genesis();
+
+        let mut txs = vec![
+            Transaction::Transfer(Transfer {
+                from: None,
+                to: ALICE.to_string(),
+                amount: 100,
+            }),
+            Transaction::Transfer(Transfer {
+                from: Some(ALICE.to_string()),
+                to: BOB.to_string(),
+                amount: 99,
+            }),
+            Transaction::Transfer(Transfer {
+                from: Some(BOB.to_string()),
+                to: ALICE.to_string(),
+                amount: 5,
+            }),
+            Transaction::Transfer(Transfer {
+                from: Some(BOB.to_string()),
+                to: ALICE.to_string(),
+                amount: 5_000,
+            }),
+        ];
+
+        let (new_block, rejected_txs) = genesis.create_next_from_txn(&mut txs);
+
+        assert_eq!(new_block.number, 1);
+        assert_eq!(new_block.final_state.balances.get(ALICE), Some(&6));
+        assert_eq!(new_block.final_state.balances.get(BOB), Some(&94));
+
+        assert_eq!(rejected_txs.len(), 1);
     }
 }
