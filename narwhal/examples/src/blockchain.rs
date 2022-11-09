@@ -3,7 +3,7 @@ use std::{
     hash::Hash,
 };
 
-use prost::bytes::{BufMut, Bytes, BytesMut};
+use prost::bytes::{Buf, BufMut, Bytes, BytesMut};
 
 type Address = u32;
 type Balance = u64;
@@ -13,20 +13,20 @@ const BLOCK_GAS_LIMIT: Gas = 20;
 const TX_MINT_GAS: Gas = 5;
 const TX_TRANSFER_GAS: Gas = 2;
 
-#[derive(Debug, Hash, Clone)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub struct Mint {
     to: Address,
     amount: Balance,
 }
 
-#[derive(Debug, Hash, Clone)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub struct Transfer {
     from: Address,
     to: Address,
     amount: Balance,
 }
 
-#[derive(Debug, Hash, Clone)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub enum Transaction {
     Mint(Mint),
     Transfer(Transfer),
@@ -52,6 +52,22 @@ impl Transaction {
         }
 
         tx.split().freeze()
+    }
+
+    pub fn deserialize(data: &mut Bytes) -> Self {
+        let ttype = data.get_u8();
+        match ttype {
+            0 => Transaction::Mint(Mint {
+                to: data.get_u32(),
+                amount: data.get_u64(),
+            }),
+            1 => Transaction::Transfer(Transfer {
+                from: data.get_u32(),
+                to: data.get_u32(),
+                amount: data.get_u64(),
+            }),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -265,16 +281,21 @@ mod tests {
             to: ALICE,
             amount: 100,
         });
+        let mut mint_ser = mint.serialize();
+        assert_eq!(mint_ser, b"\0\0\0\0\x01\0\0\0\0\0\0\0d"[..]);
+
+        let mint_deser = Transaction::deserialize(&mut mint_ser);
+        assert_eq!(mint, mint_deser);
+
         let transf = Transaction::Transfer(Transfer {
             from: ALICE,
             to: BOB,
             amount: 99,
         });
-
-        let mint_ser = mint.serialize();
-        let transf_ser = transf.serialize();
-
-        assert_eq!(mint_ser, b"\0\0\0\0\x01\0\0\0\0\0\0\0d"[..]);
+        let mut transf_ser = transf.serialize();
         assert_eq!(transf_ser, b"\x01\0\0\0\x01\0\0\0\x02\0\0\0\0\0\0\0c"[..]);
+
+        let transf_deser = Transaction::deserialize(&mut transf_ser);
+        assert_eq!(transf, transf_deser);
     }
 }
