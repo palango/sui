@@ -282,7 +282,10 @@ mod tests {
             amount: 100,
         });
         let mut mint_ser = mint.serialize();
-        assert_eq!(mint_ser, b"\0\0\0\0\x01\0\0\0\0\0\0\0d"[..]);
+        assert_eq!(
+            mint_ser,
+            b"\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x64"[..]
+        );
 
         let mint_deser = Transaction::deserialize(&mut mint_ser);
         assert_eq!(mint, mint_deser);
@@ -293,7 +296,10 @@ mod tests {
             amount: 99,
         });
         let mut transf_ser = transf.serialize();
-        assert_eq!(transf_ser, b"\x01\0\0\0\x01\0\0\0\x02\0\0\0\0\0\0\0c"[..]);
+        assert_eq!(
+            transf_ser,
+            b"\x01\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x63"[..]
+        );
 
         let transf_deser = Transaction::deserialize(&mut transf_ser);
         assert_eq!(transf, transf_deser);
