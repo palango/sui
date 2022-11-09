@@ -8,17 +8,25 @@ type Balance = u64;
 type Gas = u64;
 
 const BLOCK_GAS_LIMIT: Gas = 20;
-const TX_GAS_PRICE: Gas = 2;
+const TX_MINT_GAS: Gas = 5;
+const TX_TRANSFER_GAS: Gas = 2;
+
+#[derive(Debug, Hash, Clone)]
+pub struct Mint {
+    to: Address,
+    amount: Balance,
+}
 
 #[derive(Debug, Hash, Clone)]
 pub struct Transfer {
-    from: Option<Address>,
+    from: Address,
     to: Address,
     amount: Balance,
 }
 
 #[derive(Debug, Hash, Clone)]
 pub enum Transaction {
+    Mint(Mint),
     Transfer(Transfer),
 }
 
@@ -48,10 +56,19 @@ impl Block {
         let mut gas_used = 0;
 
         // FIXME: Add tx ordering here
-        while gas_used + TX_GAS_PRICE <= BLOCK_GAS_LIMIT {
+        loop {
             if let Some(tx) = txs.pop_front() {
+                let gas_cost = match tx {
+                    Transaction::Mint(_) => TX_MINT_GAS,
+                    Transaction::Transfer(_) => TX_TRANSFER_GAS,
+                };
+                if gas_used + gas_cost > BLOCK_GAS_LIMIT {
+                    rejected_txs.push(tx);
+                    break;
+                }
+
                 if next_state.apply_tx(&tx) {
-                    gas_used += TX_GAS_PRICE;
+                    gas_used += gas_cost;
                     accepted_txs.push(tx)
                 } else {
                     rejected_txs.push(tx);
@@ -88,7 +105,7 @@ impl State {
     fn apply_tx(&mut self, tx: &Transaction) -> bool {
         match tx {
             // No 'from' address means minting
-            Transaction::Transfer(t) if t.from.is_none() => {
+            Transaction::Mint(t) => {
                 self.balances
                     .entry(t.to.clone())
                     .and_modify(|e| *e += t.amount)
@@ -97,8 +114,7 @@ impl State {
             }
             // Transfer
             Transaction::Transfer(t) => {
-                let sender = t.from.clone().unwrap();
-                match self.balances.entry(sender) {
+                match self.balances.entry(t.from.clone()) {
                     Entry::Occupied(mut sender_entry) => {
                         // Sender's balance to small
                         let current_val = *sender_entry.get();
@@ -133,8 +149,7 @@ mod tests {
     #[test]
     fn state_minting() {
         let mut state = State::new();
-        let tx = Transaction::Transfer(Transfer {
-            from: None,
+        let tx = Transaction::Mint(Mint {
             to: BOB.to_string(),
             amount: 12345,
         });
@@ -150,15 +165,14 @@ mod tests {
 
         // Alice has no balance
         let tx = Transaction::Transfer(Transfer {
-            from: Some(ALICE.to_string()),
+            from: ALICE.to_string(),
             to: BOB.to_string(),
             amount: 12345,
         });
         assert!(!state.apply_tx(&tx));
 
         // Mint some tokens for Alice
-        let tx = Transaction::Transfer(Transfer {
-            from: None,
+        let tx = Transaction::Mint(Mint {
             to: ALICE.to_string(),
             amount: 100,
         });
@@ -167,7 +181,7 @@ mod tests {
 
         // Alice has to little balance
         let tx = Transaction::Transfer(Transfer {
-            from: Some(ALICE.to_string()),
+            from: ALICE.to_string(),
             to: BOB.to_string(),
             amount: 200,
         });
@@ -176,7 +190,7 @@ mod tests {
 
         // Alice can transfer
         let tx = Transaction::Transfer(Transfer {
-            from: Some(ALICE.to_string()),
+            from: ALICE.to_string(),
             to: BOB.to_string(),
             amount: 99,
         });
@@ -189,24 +203,23 @@ mod tests {
     fn block_creation() {
         let genesis = Block::genesis();
 
-        let mut txs = VecDeque::from([
-            Transaction::Transfer(Transfer {
-                from: None,
+        let txs = VecDeque::from([
+            Transaction::Mint(Mint {
                 to: ALICE.to_string(),
                 amount: 100,
             }),
             Transaction::Transfer(Transfer {
-                from: Some(ALICE.to_string()),
+                from: ALICE.to_string(),
                 to: BOB.to_string(),
                 amount: 99,
             }),
             Transaction::Transfer(Transfer {
-                from: Some(BOB.to_string()),
+                from: BOB.to_string(),
                 to: ALICE.to_string(),
                 amount: 5,
             }),
             Transaction::Transfer(Transfer {
-                from: Some(BOB.to_string()),
+                from: BOB.to_string(),
                 to: ALICE.to_string(),
                 amount: 5_000,
             }),
