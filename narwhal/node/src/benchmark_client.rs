@@ -1,7 +1,6 @@
 // Copyright (c) 2021, Facebook, Inc. and its affiliates
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
-use bytes::{BufMut as _, BytesMut};
 use clap::{crate_name, crate_version, App, AppSettings};
 use eyre::Context;
 use futures::{future::join_all, StreamExt};
@@ -14,6 +13,9 @@ use tracing::{info, subscriber::set_global_default, warn};
 use tracing_subscriber::filter::EnvFilter;
 use types::{TransactionProto, TransactionsClient};
 use url::Url;
+
+mod blockchain;
+use blockchain::{Mint, Transaction, Transfer};
 
 #[tokio::main]
 async fn main() -> Result<(), eyre::Report> {
@@ -139,9 +141,12 @@ impl Client {
 
         // Submit all transactions.
         let mut counter = 0;
-        let mut r = rand::thread_rng().gen();
         let interval = interval(Duration::from_millis(BURST_DURATION));
         tokio::pin!(interval);
+
+        // Create some addresses to use in our transactions
+        let num_addrs = 100;
+        let addresses: Vec<u32> = (0..num_addrs).map(|_| rand::thread_rng().gen()).collect();
 
         // NOTE: This log entry is used to compute performance.
         info!("Start sending transactions");
@@ -149,25 +154,47 @@ impl Client {
         'main: loop {
             interval.as_mut().tick().await;
             let now = Instant::now();
+            let mut rng = rand::thread_rng();
 
-            let mut tx = BytesMut::with_capacity(self.size);
+            // FIXME: I did this because the access cannot be done inside the closure
+            // There should be a way to do this though...
+            let a = addresses[rng.gen_range(0..num_addrs)];
+            let b = addresses[rng.gen_range(0..num_addrs)];
+
             let size = self.size;
             let stream = tokio_stream::iter(0..burst).map(move |x| {
-                if x == counter % burst {
+                let mut rng = rand::thread_rng();
+                let tx: Transaction;
+                // if x == counter % burst {
+                if rng.gen::<bool>() {
+                    let (a, b) = (b, a);
+                }
+                if rng.gen::<bool>() {
                     // NOTE: This log entry is used to compute performance.
                     info!("Sending sample transaction {counter}");
 
-                    tx.put_u8(0u8); // Sample txs start with 0.
-                    tx.put_u64(counter); // This counter identifies the tx.
-                } else {
-                    r += 1;
-                    tx.put_u8(1u8); // Standard txs start with 1.
-                    tx.put_u64(r); // Ensures all clients send different txs.
-                };
+                    // FIXME: We might need to change our tx IDs to keep this working
+                    // tx.put_u8(0u8); // Sample txs start with 0.
+                    // tx.put_u64(counter); // This counter identifies the tx.
 
-                tx.resize(size, 0u8);
-                let bytes = tx.split().freeze();
-                TransactionProto { transaction: bytes }
+                    tx = Transaction::Mint(Mint {
+                        to: a,
+                        amount: rng.gen_range(0..100_000),
+                    });
+                } else {
+                    // r += 1;
+                    // tx.put_u8(1u8); // Standard txs start with 1.
+                    // tx.put_u64(r); // Ensures all clients send different txs.
+
+                    tx = Transaction::Transfer(Transfer {
+                        to: a,
+                        from: b,
+                        amount: rng.gen_range(0..100_000),
+                    });
+                };
+                TransactionProto {
+                    transaction: tx.serialize(),
+                }
             });
 
             if let Err(e) = client.submit_transaction_stream(stream).await {

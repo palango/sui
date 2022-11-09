@@ -3,7 +3,7 @@ use std::{
     hash::Hash,
 };
 
-use prost::bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 type Address = u32;
 type Balance = u64;
@@ -15,15 +15,15 @@ const TX_TRANSFER_GAS: Gas = 2;
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub struct Mint {
-    to: Address,
-    amount: Balance,
+    pub to: Address,
+    pub amount: Balance,
 }
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub struct Transfer {
-    from: Address,
-    to: Address,
-    amount: Balance,
+    pub from: Address,
+    pub to: Address,
+    pub amount: Balance,
 }
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
