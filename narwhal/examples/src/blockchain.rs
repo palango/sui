@@ -3,7 +3,9 @@ use std::{
     hash::Hash,
 };
 
-type Address = String;
+use prost::bytes::{BufMut, Bytes, BytesMut};
+
+type Address = u32;
 type Balance = u64;
 type Gas = u64;
 
@@ -28,6 +30,29 @@ pub struct Transfer {
 pub enum Transaction {
     Mint(Mint),
     Transfer(Transfer),
+}
+
+impl Transaction {
+    pub fn serialize(&self) -> Bytes {
+        let mut tx = BytesMut::new();
+        match self {
+            Transaction::Mint(m) => {
+                tx.put_u8(0);
+                tx.put_u32(m.to);
+                tx.put_u64(m.amount);
+                tx.resize(13, 0)
+            }
+            Transaction::Transfer(t) => {
+                tx.put_u8(1);
+                tx.put_u32(t.from);
+                tx.put_u32(t.to);
+                tx.put_u64(t.amount);
+                tx.resize(17, 0)
+            }
+        }
+
+        tx.split().freeze()
+    }
 }
 
 #[derive(Debug, Hash)]
@@ -143,20 +168,20 @@ impl State {
 mod tests {
     use super::*;
 
-    const ALICE: &str = "Alice";
-    const BOB: &str = "Bob";
+    const ALICE: u32 = 1;
+    const BOB: u32 = 2;
 
     #[test]
     fn state_minting() {
         let mut state = State::new();
         let tx = Transaction::Mint(Mint {
-            to: BOB.to_string(),
+            to: BOB,
             amount: 12345,
         });
 
-        assert_eq!(state.balances.get(BOB), None);
+        assert_eq!(state.balances.get(&BOB), None);
         assert!(state.apply_tx(&tx));
-        assert_eq!(state.balances.get(BOB), Some(&12345));
+        assert_eq!(state.balances.get(&BOB), Some(&12345));
     }
 
     #[test]
@@ -165,38 +190,38 @@ mod tests {
 
         // Alice has no balance
         let tx = Transaction::Transfer(Transfer {
-            from: ALICE.to_string(),
-            to: BOB.to_string(),
+            from: ALICE,
+            to: BOB,
             amount: 12345,
         });
         assert!(!state.apply_tx(&tx));
 
         // Mint some tokens for Alice
         let tx = Transaction::Mint(Mint {
-            to: ALICE.to_string(),
+            to: ALICE,
             amount: 100,
         });
         assert!(state.apply_tx(&tx));
-        assert_eq!(state.balances.get(ALICE), Some(&100));
+        assert_eq!(state.balances.get(&ALICE), Some(&100));
 
         // Alice has to little balance
         let tx = Transaction::Transfer(Transfer {
-            from: ALICE.to_string(),
-            to: BOB.to_string(),
+            from: ALICE,
+            to: BOB,
             amount: 200,
         });
         assert!(!state.apply_tx(&tx));
-        assert_eq!(state.balances.get(ALICE), Some(&100));
+        assert_eq!(state.balances.get(&ALICE), Some(&100));
 
         // Alice can transfer
         let tx = Transaction::Transfer(Transfer {
-            from: ALICE.to_string(),
-            to: BOB.to_string(),
+            from: ALICE,
+            to: BOB,
             amount: 99,
         });
         assert!(state.apply_tx(&tx));
-        assert_eq!(state.balances.get(ALICE), Some(&1));
-        assert_eq!(state.balances.get(BOB), Some(&99));
+        assert_eq!(state.balances.get(&ALICE), Some(&1));
+        assert_eq!(state.balances.get(&BOB), Some(&99));
     }
 
     #[test]
@@ -205,22 +230,22 @@ mod tests {
 
         let txs = VecDeque::from([
             Transaction::Mint(Mint {
-                to: ALICE.to_string(),
+                to: ALICE,
                 amount: 100,
             }),
             Transaction::Transfer(Transfer {
-                from: ALICE.to_string(),
-                to: BOB.to_string(),
+                from: ALICE,
+                to: BOB,
                 amount: 99,
             }),
             Transaction::Transfer(Transfer {
-                from: BOB.to_string(),
-                to: ALICE.to_string(),
+                from: BOB,
+                to: ALICE,
                 amount: 5,
             }),
             Transaction::Transfer(Transfer {
-                from: BOB.to_string(),
-                to: ALICE.to_string(),
+                from: BOB,
+                to: ALICE,
                 amount: 5_000,
             }),
         ]);
@@ -228,9 +253,28 @@ mod tests {
         let (new_block, rejected_txs) = genesis.create_next_from_txn(txs);
 
         assert_eq!(new_block.number, 1);
-        assert_eq!(new_block.final_state.balances.get(ALICE), Some(&6));
-        assert_eq!(new_block.final_state.balances.get(BOB), Some(&94));
+        assert_eq!(new_block.final_state.balances.get(&ALICE), Some(&6));
+        assert_eq!(new_block.final_state.balances.get(&BOB), Some(&94));
 
         assert_eq!(rejected_txs.len(), 1);
+    }
+
+    #[test]
+    fn serialisation() {
+        let mint = Transaction::Mint(Mint {
+            to: ALICE,
+            amount: 100,
+        });
+        let transf = Transaction::Transfer(Transfer {
+            from: ALICE,
+            to: BOB,
+            amount: 99,
+        });
+
+        let mint_ser = mint.serialize();
+        let transf_ser = transf.serialize();
+
+        assert_eq!(mint_ser, b"\0\0\0\0\x01\0\0\0\0\0\0\0d"[..]);
+        assert_eq!(transf_ser, b"\x01\0\0\0\x01\0\0\0\x02\0\0\0\0\0\0\0c"[..]);
     }
 }
