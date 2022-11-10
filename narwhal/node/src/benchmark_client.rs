@@ -158,8 +158,8 @@ impl Client {
 
             // FIXME: I did this because the access cannot be done inside the closure
             // There should be a way to do this though...
-            let a = addresses[rng.gen_range(0..num_addrs)];
-            let b = addresses[rng.gen_range(0..num_addrs)];
+            let mut a = addresses[rng.gen_range(0..num_addrs)];
+            let mut b = addresses[rng.gen_range(0..num_addrs)];
 
             let size = self.size;
             let stream = tokio_stream::iter(0..burst).map(move |x| {
@@ -167,7 +167,7 @@ impl Client {
                 let tx: Transaction;
                 // if x == counter % burst {
                 if rng.gen::<bool>() {
-                    let (a, b) = (b, a);
+                    (a, b) = (b, a);
                 }
                 if rng.gen::<bool>() {
                     // NOTE: This log entry is used to compute performance.
