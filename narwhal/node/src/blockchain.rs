@@ -1,5 +1,5 @@
 use std::{
-    collections::{btree_map::Entry, BTreeMap, VecDeque},
+    collections::{btree_map::Entry, BTreeMap},
     hash::Hash,
 };
 
@@ -75,7 +75,8 @@ impl Transaction {
 pub struct Block {
     number: u64,
     transactions: Vec<Transaction>,
-    final_state: State,
+    state: State,
+    gas_used: Gas,
 }
 
 impl Block {
@@ -83,52 +84,81 @@ impl Block {
         Self {
             number: 0,
             transactions: vec![],
-            final_state: State::new(),
+            state: State::new(),
+            gas_used: 0,
         }
     }
 
-    pub fn create_next_from_txn(
-        &self,
-        mut txs: VecDeque<Transaction>,
-    ) -> (Block, Vec<Transaction>) {
-        let mut rejected_txs = vec![];
-        let mut accepted_txs = vec![];
-        let mut next_state = self.final_state.clone();
-        let mut gas_used = 0;
+    pub fn next(&self) -> Self {
+        Self {
+            number: self.number + 1,
+            transactions: Vec::new(),
+            state: self.state.clone(),
+            gas_used: 0,
+        }
+    }
 
-        // FIXME: Add tx ordering here
-        loop {
-            if let Some(tx) = txs.pop_front() {
-                let gas_cost = match tx {
-                    Transaction::Mint(_) => TX_MINT_GAS,
-                    Transaction::Transfer(_) => TX_TRANSFER_GAS,
-                };
-                if gas_used + gas_cost > BLOCK_GAS_LIMIT {
-                    rejected_txs.push(tx);
-                    break;
-                }
-
-                if next_state.apply_tx(&tx) {
-                    gas_used += gas_cost;
-                    accepted_txs.push(tx)
-                } else {
-                    rejected_txs.push(tx);
-                }
-            } else {
-                break;
-            }
+    pub fn try_apply_tx(&mut self, tx: Transaction) -> Result<(), &'static str> {
+        let gas_cost = match tx {
+            Transaction::Mint(_) => TX_MINT_GAS,
+            Transaction::Transfer(_) => TX_TRANSFER_GAS,
+        };
+        if self.gas_used + gas_cost > BLOCK_GAS_LIMIT {
+            return Err("Gas limit reached");
         }
 
-        rejected_txs.extend(txs);
-        (
-            Block {
-                number: self.number + 1,
-                transactions: accepted_txs,
-                final_state: next_state,
-            },
-            rejected_txs,
-        )
+        if self.state.apply_tx(&tx) {
+            self.gas_used += gas_cost;
+            self.transactions.push(tx);
+            return Ok(());
+        } else {
+            return Err("Could not execute tx");
+        }
     }
+
+    // pub fn create_next_from_txn(
+    //     &self,
+    //     mut txs: VecDeque<Transaction>,
+    // ) -> (Block, Vec<Transaction>) {
+    //     let mut rejected_txs = vec![];
+    //     let mut accepted_txs = vec![];
+    //     let mut next_state = self.state.clone();
+    //     let mut gas_used = 0;
+
+    //     // FIXME: Add tx ordering here
+    //     loop {
+    //         if let Some(tx) = txs.pop_front() {
+    //             let gas_cost = match tx {
+    //                 Transaction::Mint(_) => TX_MINT_GAS,
+    //                 Transaction::Transfer(_) => TX_TRANSFER_GAS,
+    //             };
+    //             if gas_used + gas_cost > BLOCK_GAS_LIMIT {
+    //                 rejected_txs.push(tx);
+    //                 break;
+    //             }
+
+    //             if next_state.apply_tx(&tx) {
+    //                 gas_used += gas_cost;
+    //                 accepted_txs.push(tx)
+    //             } else {
+    //                 rejected_txs.push(tx);
+    //             }
+    //         } else {
+    //             break;
+    //         }
+    //     }
+
+    //     rejected_txs.extend(txs);
+    //     (
+    //         Block {
+    //             number: self.number + 1,
+    //             transactions: accepted_txs,
+    //             state: next_state,
+    //             gas_used
+    //         },
+    //         rejected_txs,
+    //     )
+    // }
 }
 
 #[derive(Debug, Hash, Clone)]
@@ -244,35 +274,40 @@ mod tests {
     fn block_creation() {
         let genesis = Block::genesis();
 
-        let txs = VecDeque::from([
-            Transaction::Mint(Mint {
-                to: ALICE,
-                amount: 100,
-            }),
-            Transaction::Transfer(Transfer {
-                from: ALICE,
-                to: BOB,
-                amount: 99,
-            }),
-            Transaction::Transfer(Transfer {
-                from: BOB,
-                to: ALICE,
-                amount: 5,
-            }),
-            Transaction::Transfer(Transfer {
-                from: BOB,
-                to: ALICE,
-                amount: 5_000,
-            }),
-        ]);
+        let m = Transaction::Mint(Mint {
+            to: ALICE,
+            amount: 100,
+        });
+        let t1 = Transaction::Transfer(Transfer {
+            from: ALICE,
+            to: BOB,
+            amount: 99,
+        });
+        let t2 = Transaction::Transfer(Transfer {
+            from: BOB,
+            to: ALICE,
+            amount: 5,
+        });
+        let t3 = Transaction::Transfer(Transfer {
+            from: BOB,
+            to: ALICE,
+            amount: 5_000,
+        });
 
-        let (new_block, rejected_txs) = genesis.create_next_from_txn(txs);
+        let mut new_block = genesis.next();
+        let receipt = new_block.try_apply_tx(m);
+        assert!(receipt.is_ok());
+        let receipt = new_block.try_apply_tx(t1);
+        assert!(receipt.is_ok());
+        let receipt = new_block.try_apply_tx(t2);
+        assert!(receipt.is_ok());
+        let receipt = new_block.try_apply_tx(t3);
+        assert!(receipt.is_err());
 
         assert_eq!(new_block.number, 1);
-        assert_eq!(new_block.final_state.balances.get(&ALICE), Some(&6));
-        assert_eq!(new_block.final_state.balances.get(&BOB), Some(&94));
-
-        assert_eq!(rejected_txs.len(), 1);
+        assert_eq!(new_block.transactions.len(), 3);
+        assert_eq!(new_block.state.balances.get(&ALICE), Some(&6));
+        assert_eq!(new_block.state.balances.get(&BOB), Some(&94));
     }
 
     #[test]
