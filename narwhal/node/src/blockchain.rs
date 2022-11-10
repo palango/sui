@@ -1,9 +1,8 @@
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::{
     collections::{btree_map::Entry, BTreeMap},
     hash::Hash,
 };
-
-use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 type Address = u32;
 type Balance = u64;
@@ -73,10 +72,15 @@ impl Transaction {
 
 #[derive(Debug, Hash)]
 pub struct Block {
-    number: u64,
+    pub number: u64,
     transactions: Vec<Transaction>,
     state: State,
     gas_used: Gas,
+}
+
+pub enum ExecutionError {
+    GasLimitReached,
+    InvalidTransaction,
 }
 
 impl Block {
@@ -98,67 +102,23 @@ impl Block {
         }
     }
 
-    pub fn try_apply_tx(&mut self, tx: Transaction) -> Result<(), &'static str> {
+    pub fn try_apply_tx(&mut self, tx: &Transaction) -> Result<(), ExecutionError> {
         let gas_cost = match tx {
             Transaction::Mint(_) => TX_MINT_GAS,
             Transaction::Transfer(_) => TX_TRANSFER_GAS,
         };
         if self.gas_used + gas_cost > BLOCK_GAS_LIMIT {
-            return Err("Gas limit reached");
+            return Err(ExecutionError::GasLimitReached);
         }
 
         if self.state.apply_tx(&tx) {
             self.gas_used += gas_cost;
-            self.transactions.push(tx);
+            self.transactions.push(tx.clone());
             return Ok(());
         } else {
-            return Err("Could not execute tx");
+            return Err(ExecutionError::InvalidTransaction);
         }
     }
-
-    // pub fn create_next_from_txn(
-    //     &self,
-    //     mut txs: VecDeque<Transaction>,
-    // ) -> (Block, Vec<Transaction>) {
-    //     let mut rejected_txs = vec![];
-    //     let mut accepted_txs = vec![];
-    //     let mut next_state = self.state.clone();
-    //     let mut gas_used = 0;
-
-    //     // FIXME: Add tx ordering here
-    //     loop {
-    //         if let Some(tx) = txs.pop_front() {
-    //             let gas_cost = match tx {
-    //                 Transaction::Mint(_) => TX_MINT_GAS,
-    //                 Transaction::Transfer(_) => TX_TRANSFER_GAS,
-    //             };
-    //             if gas_used + gas_cost > BLOCK_GAS_LIMIT {
-    //                 rejected_txs.push(tx);
-    //                 break;
-    //             }
-
-    //             if next_state.apply_tx(&tx) {
-    //                 gas_used += gas_cost;
-    //                 accepted_txs.push(tx)
-    //             } else {
-    //                 rejected_txs.push(tx);
-    //             }
-    //         } else {
-    //             break;
-    //         }
-    //     }
-
-    //     rejected_txs.extend(txs);
-    //     (
-    //         Block {
-    //             number: self.number + 1,
-    //             transactions: accepted_txs,
-    //             state: next_state,
-    //             gas_used
-    //         },
-    //         rejected_txs,
-    //     )
-    // }
 }
 
 #[derive(Debug, Hash, Clone)]
@@ -295,13 +255,13 @@ mod tests {
         });
 
         let mut new_block = genesis.next();
-        let receipt = new_block.try_apply_tx(m);
+        let receipt = new_block.try_apply_tx(&m);
         assert!(receipt.is_ok());
-        let receipt = new_block.try_apply_tx(t1);
+        let receipt = new_block.try_apply_tx(&t1);
         assert!(receipt.is_ok());
-        let receipt = new_block.try_apply_tx(t2);
+        let receipt = new_block.try_apply_tx(&t2);
         assert!(receipt.is_ok());
-        let receipt = new_block.try_apply_tx(t3);
+        let receipt = new_block.try_apply_tx(&t3);
         assert!(receipt.is_err());
 
         assert_eq!(new_block.number, 1);
