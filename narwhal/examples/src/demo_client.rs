@@ -11,8 +11,10 @@ use narwhal::{
 };
 use prost::bytes::Bytes;
 use std::{
+    collections::hash_map::DefaultHasher,
     fmt,
     fmt::{Display, Formatter},
+    hash::{Hash, Hasher},
 };
 use tonic::Status;
 
@@ -75,6 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let genesis = Block::genesis();
+    let mut hasher = DefaultHasher::new();
 
     println!(
         "******************************** Proposer Service ********************************\n"
@@ -174,7 +177,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         match current_block.try_apply_tx(&tx) {
                             Err(ExecutionError::GasLimitReached) => {
                                 println!("Block {block_number} reached gas limit.");
-                                println!("Block {block_number} finalized with root TODO.");
+                                current_block.hash(&mut hasher);
+                                println!(
+                                    "Block {block_number} finalized with root #{:x}.",
+                                    hasher.finish()
+                                );
                                 current_block = current_block.next();
                                 block_number = current_block.number;
                                 println!("Block {block_number} created.");
