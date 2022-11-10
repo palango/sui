@@ -31,6 +31,7 @@ use types::{
 };
 use worker::{metrics::initialise_metrics, Worker};
 
+pub mod blockchain;
 pub mod execution_state;
 pub mod metrics;
 pub mod restarter;

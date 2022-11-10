@@ -7,9 +7,8 @@ use narwhal::{
     validator_client::ValidatorClient, CertificateDigest, CollectionRetrievalResult, Empty,
     GetCollectionsRequest, GetCollectionsResponse, NodeReadCausalRequest, NodeReadCausalResponse,
     PublicKey, ReadCausalRequest, ReadCausalResponse, RemoveCollectionsRequest, RoundsRequest,
-    RoundsResponse, Transaction,
+    RoundsResponse,
 };
-use prost::bytes::Bytes;
 use std::{
     fmt,
     fmt::{Display, Formatter},
@@ -20,7 +19,6 @@ pub mod narwhal {
     #![allow(clippy::derive_partial_eq_without_eq)]
     tonic::include_proto!("narwhal");
 }
-use node::blockchain::{Block, Transaction as ChainTx};
 
 /// DEMO CONSTANTS
 const PRIMARY_0_PUBLIC_KEY: &str = "Zy82aSpF8QghKE4wWvyIoTWyLetCuUSfk2gxHEtwdbg=";
@@ -33,6 +31,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let matches = App::new(crate_name!())
         .version(crate_version!())
         .about("A gRPC client emulating the Proposer / Validator API")
+        .subcommand(
+            SubCommand::with_name("docker_demo")
+                .about("run the demo with the hardcoded Docker deployment"),
+        )
         .subcommand(
             SubCommand::with_name("run")
                 .about("Run the demo with a local gRPC server")
@@ -57,6 +59,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut dsts = Vec::new();
     let mut base64_keys = Vec::new();
     match matches.subcommand() {
+        ("docker_demo", Some(_sub_matches)) => {
+            dsts.push("http://127.0.0.1:8000".to_owned());
+            base64_keys.push(PRIMARY_0_PUBLIC_KEY.to_owned());
+        }
         ("run", Some(sub_matches)) => {
             let ports = sub_matches
                 .values_of("ports")
@@ -76,8 +82,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => unreachable!(),
     }
 
-    let genesis = Block::genesis();
-
     println!(
         "******************************** Proposer Service ********************************\n"
     );
@@ -89,7 +93,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n1) Retrieve the range of rounds you have a collection for");
     println!("\n\t---- Use Rounds endpoint ----\n");
 
-    // Q: Why is this for a specific validator?
     let rounds_request = RoundsRequest {
         public_key: Some(PublicKey {
             bytes: public_key.clone(),
@@ -152,19 +155,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let response = validator_client_1.get_collections(request).await;
                     let get_collection_response = response.unwrap().into_inner();
 
-                    let (total_num_of_transactions, total_transactions_size, txs) =
+                    let (total_num_of_transactions, total_transactions_size) =
                         get_total_transaction_count_and_size(
                             get_collection_response.result.clone(),
                         );
-
-                    for (n, tx) in txs.into_iter().enumerate() {
-                        // println!("\t\t\tFound tx {n}: {tx:?}");
-
-                        // Try to parse into typed tx
-                        let mut data_bytes = Bytes::copy_from_slice(tx.transaction.as_slice());
-                        let b = ChainTx::deserialize(&mut data_bytes);
-                        println!("\t\t\tDeserialized tx {n}: {b:?}");
-                    }
 
                     // TODO: This doesn't work in Docker yet, figure out why
                     println!("\t\tFound {total_num_of_transactions} transactions with a total size of {total_transactions_size} bytes");
@@ -338,7 +332,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\t{}\n", get_collection_response);
 
-    let (total_num_of_transactions, total_transactions_size, txs) =
+    let (total_num_of_transactions, total_transactions_size) =
         get_total_transaction_count_and_size(get_collection_response.result.clone());
 
     // TODO: This doesn't work in Docker yet, figure out why
@@ -367,30 +361,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn get_total_transaction_count_and_size(
-    result: Vec<CollectionRetrievalResult>,
-) -> (i32, usize, Vec<Transaction>) {
+fn get_total_transaction_count_and_size(result: Vec<CollectionRetrievalResult>) -> (i32, usize) {
     let mut total_num_of_transactions = 0;
     let mut total_transactions_size = 0;
-    let mut transactions = Vec::with_capacity(result.len());
-
     for r in result {
         match r.retrieval_result.unwrap() {
             RetrievalResult::Collection(collection) => {
                 for t in collection.transactions {
                     total_transactions_size += t.transaction.len();
                     total_num_of_transactions += 1;
-                    transactions.push(t)
                 }
             }
             RetrievalResult::Error(_) => {}
         }
     }
-    (
-        total_num_of_transactions,
-        total_transactions_size,
-        transactions,
-    )
+    (total_num_of_transactions, total_transactions_size)
 }
 
 ////////////////////////////////////////////////////////////////////////
