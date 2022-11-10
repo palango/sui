@@ -20,10 +20,8 @@ pub mod narwhal {
     #![allow(clippy::derive_partial_eq_without_eq)]
     tonic::include_proto!("narwhal");
 }
-use node::blockchain::{Block, Transaction as ChainTx};
+use node::blockchain::{Block, ExecutionError, Transaction as ChainTx};
 
-/// DEMO CONSTANTS
-const PRIMARY_0_PUBLIC_KEY: &str = "Zy82aSpF8QghKE4wWvyIoTWyLetCuUSfk2gxHEtwdbg=";
 // Assumption that each transaction costs 1 gas to complete
 // Chose this number because it allows demo to complete round + get extra collections when proposing block.
 const BLOCK_GAS_LIMIT: i32 = 300000;
@@ -157,16 +155,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             get_collection_response.result.clone(),
                         );
 
-                    for (n, tx) in txs.into_iter().enumerate() {
-                        // println!("\t\t\tFound tx {n}: {tx:?}");
+                    let decoded_txs: Vec<_> = txs
+                        .into_iter()
+                        .map(|tx| {
+                            let mut data_bytes = Bytes::copy_from_slice(tx.transaction.as_slice());
+                            ChainTx::deserialize(&mut data_bytes)
+                        })
+                        .enumerate()
+                        .inspect(|(i, tx)| {
+                            println!("\t\t\tDeserialized tx {i}: {tx:?}");
+                        })
+                        .map(|(_, tx)| tx)
+                        .collect();
 
-                        // Try to parse into typed tx
-                        let mut data_bytes = Bytes::copy_from_slice(tx.transaction.as_slice());
-                        let b = ChainTx::deserialize(&mut data_bytes);
-                        println!("\t\t\tDeserialized tx {n}: {b:?}");
+                    let mut current_block = genesis.next();
+                    for tx in decoded_txs {
+                        let mut block_number = current_block.number;
+                        match current_block.try_apply_tx(&tx) {
+                            Err(ExecutionError::GasLimitReached) => {
+                                println!("Block {block_number} reached gas limit.");
+                                println!("Block {block_number} finalized with root TODO.");
+                                current_block = current_block.next();
+                                block_number = current_block.number;
+                                println!("Block {block_number} created.");
+                                // FIXME: will skip this tx here
+                            }
+                            Err(ExecutionError::InvalidTransaction) => {
+                                println!("Tx {:?} failed to execute in block {block_number}", &tx);
+                            }
+                            Ok(_) => {
+                                println!("Tx {tx:?} executed in block {block_number}");
+                            }
+                        }
                     }
 
-                    // TODO: This doesn't work in Docker yet, figure out why
                     println!("\t\tFound {total_num_of_transactions} transactions with a total size of {total_transactions_size} bytes");
 
                     proposed_block_gas_cost += total_num_of_transactions;
@@ -338,7 +360,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\t{}\n", get_collection_response);
 
-    let (total_num_of_transactions, total_transactions_size, txs) =
+    let (total_num_of_transactions, total_transactions_size, _txs) =
         get_total_transaction_count_and_size(get_collection_response.result.clone());
 
     // TODO: This doesn't work in Docker yet, figure out why

@@ -4927,6 +4927,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "clap 2.34.0",
+ "narwhal-node",
  "prost 0.11.0",
  "protobuf-src",
  "tokio",
