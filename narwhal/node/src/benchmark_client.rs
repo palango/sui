@@ -4,6 +4,7 @@
 use clap::{crate_name, crate_version, App, AppSettings};
 use eyre::Context;
 use futures::{future::join_all, StreamExt};
+use narwhal_node::blockchain::{TX_MINT_GAS, TX_TRANSFER_GAS};
 use rand::Rng;
 use tokio::{
     net::TcpStream,
@@ -180,6 +181,7 @@ impl Client {
                     tx = Transaction::Mint(Mint {
                         to: a,
                         amount: rng.gen_range(0..100_000),
+                        gas: TX_MINT_GAS + rng.gen_range(0..4),
                     });
                 } else {
                     // r += 1;
@@ -190,6 +192,7 @@ impl Client {
                         to: a,
                         from: b,
                         amount: rng.gen_range(0..100_000),
+                        gas: TX_TRANSFER_GAS + rng.gen_range(0..2),
                     });
                 };
                 TransactionProto {

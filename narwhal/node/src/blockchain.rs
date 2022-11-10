@@ -6,16 +6,17 @@ use std::{
 
 type Address = u32;
 type Balance = u64;
-type Gas = u64;
+type Gas = u32;
 
-const BLOCK_GAS_LIMIT: Gas = 20;
-const TX_MINT_GAS: Gas = 5;
-const TX_TRANSFER_GAS: Gas = 2;
+pub const BLOCK_GAS_LIMIT: Gas = 20;
+pub const TX_MINT_GAS: Gas = 5;
+pub const TX_TRANSFER_GAS: Gas = 2;
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub struct Mint {
     pub to: Address,
     pub amount: Balance,
+    pub gas: Gas,
 }
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
@@ -23,6 +24,7 @@ pub struct Transfer {
     pub from: Address,
     pub to: Address,
     pub amount: Balance,
+    pub gas: Gas,
 }
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
@@ -32,6 +34,13 @@ pub enum Transaction {
 }
 
 impl Transaction {
+    pub fn gas(&self) -> u32 {
+        match self {
+            Transaction::Mint(m) => m.gas,
+            Transaction::Transfer(t) => t.gas,
+        }
+    }
+
     pub fn serialize(&self) -> Bytes {
         let mut tx = BytesMut::new();
         match self {
@@ -39,14 +48,16 @@ impl Transaction {
                 tx.put_u8(0);
                 tx.put_u32(m.to);
                 tx.put_u64(m.amount);
-                tx.resize(13, 0)
+                tx.put_u32(m.gas);
+                tx.resize(17, 0)
             }
             Transaction::Transfer(t) => {
                 tx.put_u8(1);
                 tx.put_u32(t.from);
                 tx.put_u32(t.to);
                 tx.put_u64(t.amount);
-                tx.resize(17, 0)
+                tx.put_u32(t.gas);
+                tx.resize(21, 0)
             }
         }
 
@@ -59,11 +70,13 @@ impl Transaction {
             0 => Transaction::Mint(Mint {
                 to: data.get_u32(),
                 amount: data.get_u64(),
+                gas: data.get_u32(),
             }),
             1 => Transaction::Transfer(Transfer {
                 from: data.get_u32(),
                 to: data.get_u32(),
                 amount: data.get_u64(),
+                gas: data.get_u32(),
             }),
             _ => unreachable!(),
         }
@@ -75,7 +88,8 @@ pub struct Block {
     pub number: u64,
     transactions: Vec<Transaction>,
     state: State,
-    gas_used: Gas,
+    pub gas_used: Gas,
+    pub gas_limit: Gas,
 }
 
 pub enum ExecutionError {
@@ -90,6 +104,7 @@ impl Block {
             transactions: vec![],
             state: State::new(),
             gas_used: 0,
+            gas_limit: BLOCK_GAS_LIMIT,
         }
     }
 
@@ -99,20 +114,17 @@ impl Block {
             transactions: Vec::new(),
             state: self.state.clone(),
             gas_used: 0,
+            gas_limit: self.gas_limit,
         }
     }
 
     pub fn try_apply_tx(&mut self, tx: &Transaction) -> Result<(), ExecutionError> {
-        let gas_cost = match tx {
-            Transaction::Mint(_) => TX_MINT_GAS,
-            Transaction::Transfer(_) => TX_TRANSFER_GAS,
-        };
-        if self.gas_used + gas_cost > BLOCK_GAS_LIMIT {
+        if self.gas_used + tx.gas() > BLOCK_GAS_LIMIT {
             return Err(ExecutionError::GasLimitReached);
         }
 
         if self.state.apply_tx(&tx) {
-            self.gas_used += gas_cost;
+            self.gas_used += tx.gas();
             self.transactions.push(tx.clone());
             return Ok(());
         } else {
@@ -192,6 +204,7 @@ mod tests {
         let tx = Transaction::Mint(Mint {
             to: BOB,
             amount: 12345,
+            gas: TX_MINT_GAS,
         });
 
         assert_eq!(state.balances.get(&BOB), None);
@@ -208,6 +221,7 @@ mod tests {
             from: ALICE,
             to: BOB,
             amount: 12345,
+            gas: TX_TRANSFER_GAS,
         });
         assert!(!state.apply_tx(&tx));
 
@@ -215,6 +229,7 @@ mod tests {
         let tx = Transaction::Mint(Mint {
             to: ALICE,
             amount: 100,
+            gas: TX_MINT_GAS,
         });
         assert!(state.apply_tx(&tx));
         assert_eq!(state.balances.get(&ALICE), Some(&100));
@@ -224,6 +239,7 @@ mod tests {
             from: ALICE,
             to: BOB,
             amount: 200,
+            gas: TX_TRANSFER_GAS,
         });
         assert!(!state.apply_tx(&tx));
         assert_eq!(state.balances.get(&ALICE), Some(&100));
@@ -233,6 +249,7 @@ mod tests {
             from: ALICE,
             to: BOB,
             amount: 99,
+            gas: TX_TRANSFER_GAS,
         });
         assert!(state.apply_tx(&tx));
         assert_eq!(state.balances.get(&ALICE), Some(&1));
@@ -246,21 +263,25 @@ mod tests {
         let m = Transaction::Mint(Mint {
             to: ALICE,
             amount: 100,
+            gas: TX_MINT_GAS,
         });
         let t1 = Transaction::Transfer(Transfer {
             from: ALICE,
             to: BOB,
             amount: 99,
+            gas: TX_TRANSFER_GAS,
         });
         let t2 = Transaction::Transfer(Transfer {
             from: BOB,
             to: ALICE,
             amount: 5,
+            gas: TX_TRANSFER_GAS,
         });
         let t3 = Transaction::Transfer(Transfer {
             from: BOB,
             to: ALICE,
             amount: 5_000,
+            gas: TX_TRANSFER_GAS,
         });
 
         let mut new_block = genesis.next();
@@ -287,6 +308,7 @@ mod tests {
         let mint = Transaction::Mint(Mint {
             to: ALICE,
             amount: 100,
+            gas: TX_MINT_GAS,
         });
         let mut mint_ser = mint.serialize();
         assert_eq!(
@@ -301,6 +323,7 @@ mod tests {
             from: ALICE,
             to: BOB,
             amount: 99,
+            gas: TX_TRANSFER_GAS,
         });
         let mut transf_ser = transf.serialize();
         assert_eq!(

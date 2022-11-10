@@ -11,10 +11,8 @@ use narwhal::{
 };
 use prost::bytes::Bytes;
 use std::{
-    collections::hash_map::DefaultHasher,
     fmt,
     fmt::{Display, Formatter},
-    hash::{Hash, Hasher},
 };
 use tonic::Status;
 
@@ -164,31 +162,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ChainTx::deserialize(&mut data_bytes)
                         })
                         .enumerate()
-                        .inspect(|(i, tx)| {
-                            println!("\t\t\tDeserialized tx {i}: {tx:?}");
-                        })
+                        // .inspect(|(i, tx)| {
+                        //     println!("\t\t\tDeserialized tx {i}: {tx:?}");
+                        // })
                         .map(|(_, tx)| tx);
 
                     let mut current_block = genesis.next();
                     for tx in decoded_txs {
-                        let mut block_number = current_block.number;
+                        // Create new block if necessary
+                        if current_block.gas_used + tx.gas() > current_block.gas_limit {
+                            println!(
+                                "Block {} reached gas limit of {} with usage {}",
+                                current_block.number,
+                                current_block.gas_limit,
+                                current_block.gas_used
+                            );
+                            println!(
+                                "Block {} finalized with root #{:x}",
+                                current_block.number,
+                                current_block.root()
+                            );
+                            current_block = current_block.next();
+                            println!("Block {} created", current_block.number);
+                        }
+
                         match current_block.try_apply_tx(&tx) {
                             Err(ExecutionError::GasLimitReached) => {
-                                println!("Block {block_number} reached gas limit.");
-                                println!(
-                                    "Block {block_number} finalized with root #{:x}.",
-                                    current_block.root()
-                                );
-                                current_block = current_block.next();
-                                block_number = current_block.number;
-                                println!("Block {block_number} created.");
-                                // FIXME: will skip this tx here
+                                unreachable!()
                             }
                             Err(ExecutionError::InvalidTransaction) => {
-                                println!("Tx {:?} failed to execute in block {block_number}", &tx);
+                                println!(
+                                    "Tx {:?} failed to execute in block {}",
+                                    &tx, current_block.number
+                                );
                             }
                             Ok(_) => {
-                                println!("Tx {tx:?} executed in block {block_number}");
+                                println!(
+                                    "Tx {tx:?} executed in block {} [gas {}/{}]",
+                                    current_block.number,
+                                    current_block.gas_used,
+                                    current_block.gas_limit
+                                );
                             }
                         }
                     }
