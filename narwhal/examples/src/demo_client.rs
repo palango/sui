@@ -74,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => unreachable!(),
     }
 
-    let genesis = Block::genesis();
+    let mut current_block = Block::genesis(BLOCK_GAS_LIMIT as u32).next();
 
     println!(
         "******************************** Proposer Service ********************************\n"
@@ -167,7 +167,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // })
                         .map(|(_, tx)| tx);
 
-                    let mut current_block = genesis.next();
                     for tx in decoded_txs {
                         // Create new block if necessary
                         if current_block.gas_used + tx.gas() > current_block.gas_limit {

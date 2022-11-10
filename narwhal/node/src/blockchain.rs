@@ -4,11 +4,10 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-type Address = u32;
-type Balance = u64;
-type Gas = u32;
+pub type Address = u32;
+pub type Balance = u64;
+pub type Gas = u32;
 
-pub const BLOCK_GAS_LIMIT: Gas = 20;
 pub const TX_MINT_GAS: Gas = 5;
 pub const TX_TRANSFER_GAS: Gas = 2;
 
@@ -98,13 +97,13 @@ pub enum ExecutionError {
 }
 
 impl Block {
-    pub fn genesis() -> Self {
+    pub fn genesis(gas_limit: Gas) -> Self {
         Self {
             number: 0,
             transactions: vec![],
             state: State::new(),
             gas_used: 0,
-            gas_limit: BLOCK_GAS_LIMIT,
+            gas_limit: gas_limit,
         }
     }
 
@@ -119,7 +118,7 @@ impl Block {
     }
 
     pub fn try_apply_tx(&mut self, tx: &Transaction) -> Result<(), ExecutionError> {
-        if self.gas_used + tx.gas() > BLOCK_GAS_LIMIT {
+        if self.gas_used + tx.gas() > self.gas_limit {
             return Err(ExecutionError::GasLimitReached);
         }
 
