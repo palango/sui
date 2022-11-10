@@ -77,7 +77,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let genesis = Block::genesis();
-    let mut hasher = DefaultHasher::new();
 
     println!(
         "******************************** Proposer Service ********************************\n"
@@ -158,7 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             get_collection_response.result.clone(),
                         );
 
-                    let decoded_txs: Vec<_> = txs
+                    let decoded_txs = txs
                         .into_iter()
                         .map(|tx| {
                             let mut data_bytes = Bytes::copy_from_slice(tx.transaction.as_slice());
@@ -168,8 +167,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .inspect(|(i, tx)| {
                             println!("\t\t\tDeserialized tx {i}: {tx:?}");
                         })
-                        .map(|(_, tx)| tx)
-                        .collect();
+                        .map(|(_, tx)| tx);
 
                     let mut current_block = genesis.next();
                     for tx in decoded_txs {
@@ -177,10 +175,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         match current_block.try_apply_tx(&tx) {
                             Err(ExecutionError::GasLimitReached) => {
                                 println!("Block {block_number} reached gas limit.");
-                                current_block.hash(&mut hasher);
                                 println!(
                                     "Block {block_number} finalized with root #{:x}.",
-                                    hasher.finish()
+                                    current_block.root()
                                 );
                                 current_block = current_block.next();
                                 block_number = current_block.number;

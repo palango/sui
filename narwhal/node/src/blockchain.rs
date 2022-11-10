@@ -1,7 +1,7 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::{
-    collections::{btree_map::Entry, BTreeMap},
-    hash::Hash,
+    collections::{btree_map::Entry, hash_map::DefaultHasher, BTreeMap},
+    hash::{Hash, Hasher},
 };
 
 type Address = u32;
@@ -70,7 +70,7 @@ impl Transaction {
     }
 }
 
-#[derive(Debug, Hash)]
+#[derive(Debug)]
 pub struct Block {
     pub number: u64,
     transactions: Vec<Transaction>,
@@ -118,6 +118,15 @@ impl Block {
         } else {
             return Err(ExecutionError::InvalidTransaction);
         }
+    }
+
+    pub fn root(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.number.hash(&mut hasher);
+        self.transactions.hash(&mut hasher);
+        self.state.hash(&mut hasher);
+        self.gas_used.hash(&mut hasher);
+        hasher.finish()
     }
 }
 
@@ -268,6 +277,9 @@ mod tests {
         assert_eq!(new_block.transactions.len(), 3);
         assert_eq!(new_block.state.balances.get(&ALICE), Some(&6));
         assert_eq!(new_block.state.balances.get(&BOB), Some(&94));
+
+        assert_eq!(new_block.root(), new_block.root());
+        assert_ne!(genesis.root(), new_block.root());
     }
 
     #[test]
