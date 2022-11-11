@@ -162,8 +162,7 @@ impl Client {
             let mut a = addresses[rng.gen_range(0..num_addrs)];
             let mut b = addresses[rng.gen_range(0..num_addrs)];
 
-            let size = self.size;
-            let stream = tokio_stream::iter(0..burst).map(move |x| {
+            let stream = tokio_stream::iter(0..burst).map(move |_| {
                 let mut rng = rand::thread_rng();
                 let tx: Transaction;
                 // if x == counter % burst {

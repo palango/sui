@@ -8,7 +8,7 @@ pub type Address = u32;
 pub type Balance = u64;
 pub type Gas = u32;
 
-pub const TX_MINT_GAS: Gas = 5;
+pub const TX_MINT_GAS: Gas = 2;
 pub const TX_TRANSFER_GAS: Gas = 2;
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
@@ -82,11 +82,11 @@ impl Transaction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub number: u64,
-    transactions: Vec<Transaction>,
-    state: State,
+    pub transactions: Vec<Transaction>,
+    pub state: State,
     pub gas_used: Gas,
     pub gas_limit: Gas,
 }
@@ -142,7 +142,7 @@ impl Block {
 }
 
 #[derive(Debug, Hash, Clone)]
-struct State {
+pub struct State {
     balances: BTreeMap<Address, Balance>,
 }
 

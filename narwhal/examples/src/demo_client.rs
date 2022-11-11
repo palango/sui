@@ -24,7 +24,7 @@ use node::blockchain::{Block, ExecutionError, Transaction as ChainTx};
 
 // Assumption that each transaction costs 1 gas to complete
 // Chose this number because it allows demo to complete round + get extra collections when proposing block.
-const BLOCK_GAS_LIMIT: i32 = 300000;
+const BLOCK_GAS_LIMIT: u32 = 1_000_000;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -75,6 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut current_block = Block::genesis(BLOCK_GAS_LIMIT as u32).next();
+    let mut block_full = false;
 
     println!(
         "******************************** Proposer Service ********************************\n"
@@ -106,7 +107,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let newest_round = rounds_response.newest_round;
     let mut round = oldest_round + 1;
     let mut last_completed_round = round;
-    let mut proposed_block_gas_cost: i32 = 0;
 
     println!("\n2) Find collections from earliest round and continue to add collections until gas limit is hit\n");
     let mut block_proposal_collection_ids = Vec::new();
@@ -167,53 +167,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // })
                         .map(|(_, tx)| tx);
 
+                    // Store state for rollback in case of reaching gas limit
+                    let start_block = current_block.clone();
                     for tx in decoded_txs {
-                        // Create new block if necessary
-                        if current_block.gas_used + tx.gas() > current_block.gas_limit {
-                            println!(
-                                "Block {} reached gas limit of {} with usage {}",
-                                current_block.number,
-                                current_block.gas_limit,
-                                current_block.gas_used
-                            );
-                            println!(
-                                "Block {} finalized with root #{:x}",
-                                current_block.number,
-                                current_block.root()
-                            );
-                            current_block = current_block.next();
-                            println!("Block {} created", current_block.number);
-                        }
-
                         match current_block.try_apply_tx(&tx) {
                             Err(ExecutionError::GasLimitReached) => {
-                                unreachable!()
+                                block_full = true;
+                                break;
                             }
-                            Err(ExecutionError::InvalidTransaction) => {
-                                println!(
-                                    "Tx {:?} failed to execute in block {}",
-                                    &tx, current_block.number
-                                );
-                            }
-                            Ok(_) => {
-                                println!(
-                                    "Tx {tx:?} executed in block {} [gas {}/{}]",
-                                    current_block.number,
-                                    current_block.gas_used,
-                                    current_block.gas_limit
-                                );
-                            }
+                            _ => {}
                         }
                     }
 
                     println!("\t\tFound {total_num_of_transactions} transactions with a total size of {total_transactions_size} bytes");
 
-                    proposed_block_gas_cost += total_num_of_transactions;
-                    if proposed_block_gas_cost <= BLOCK_GAS_LIMIT {
-                        println!("\t\tAdding {total_num_of_transactions} transactions to the proposed block, increasing the block gas cost to {proposed_block_gas_cost}");
+                    if !block_full {
+                        println!("\t\tAdding {total_num_of_transactions} transactions to the proposed block, increasing the block gas cost to {}", current_block.gas_used);
                         new_collections.push(collection_id);
                     } else {
-                        println!("\t\t*Not adding {total_num_of_transactions} transactions to the proposed block as it would increase the block gas cost to {proposed_block_gas_cost} which is greater than block gas limit of {BLOCK_GAS_LIMIT}");
+                        println!("\t\t*Not adding {total_num_of_transactions} transactions to the proposed block as it would increase the block gas cost above the block gas limit of {}", current_block.gas_limit);
+                        current_block = start_block;
                         break;
                     }
                 }
@@ -234,11 +207,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             println!("\tError trying to node read causal at round {round}\n")
         }
-        if proposed_block_gas_cost >= BLOCK_GAS_LIMIT {
+        if block_full {
             println!("\t\t***********************************************************************");
             println!(
                 "\t\t* Will not continue on more rounds as gas limit {} has been reached",
-                BLOCK_GAS_LIMIT
+                current_block.gas_limit
             );
             println!("\t\t***********************************************************************");
             break;
