@@ -13,10 +13,13 @@ path = "src/demo_client.rs"
 [dependencies]
 base64 = "0.13.0"
 clap = "2.34"
+futures = "0.3.24"
 prost = "0.11.0"
 tokio = { version = "1.20.1", features = ["macros", "rt-multi-thread"] }
+tokio-stream = "0.1.10"
 tonic = "0.8.2"
 node = { path = "../node", package = "narwhal-node" }
+types = { path = "../types", package = "narwhal-types" }
 workspace-hack.workspace = true
 
 [target.'cfg(not(target_env = "msvc"))'.build-dependencies]

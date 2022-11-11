@@ -9,12 +9,15 @@ use narwhal::{
     PublicKey, ReadCausalRequest, ReadCausalResponse, RemoveCollectionsRequest, RoundsRequest,
     RoundsResponse, Transaction,
 };
+
+use futures::StreamExt;
 use prost::bytes::Bytes;
 use std::{
     fmt,
     fmt::{Display, Formatter},
 };
 use tonic::Status;
+use types::{TransactionProto, TransactionsClient};
 
 pub mod narwhal {
     #![allow(clippy::derive_partial_eq_without_eq)]
@@ -76,6 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut current_block = Block::genesis(BLOCK_GAS_LIMIT as u32).next();
     let mut block_full = false;
+    let mut failed_txs = Vec::new();
 
     println!(
         "******************************** Proposer Service ********************************\n"
@@ -175,6 +179,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 block_full = true;
                                 break;
                             }
+                            Err(ExecutionError::InvalidTransaction) => {
+                                failed_txs.push(tx);
+                            }
                             _ => {}
                         }
                     }
@@ -218,6 +225,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 current_block.number,
                 current_block.root()
             );
+            println!(
+                "\t\tThere were {} transactions which failed to execute, adding them back to narwhal",
+                failed_txs.len()
+            );
             println!("\t\t***********************************************************************");
             break;
         } else {
@@ -227,6 +238,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if round > newest_round {
         last_completed_round = newest_round;
+    }
+
+    println!("\n2b2) Adding back failed transactions back to narwhal.\n");
+    println!("---- Use TransactionClient.SubmitTransactionStream endpoint ----\n");
+    // Connect to the mempool.
+    let mut client = TransactionsClient::connect(dsts[0].clone())
+        .await
+        .expect("Could not create TransactionsClient");
+    let stream = tokio_stream::iter(failed_txs).map(move |tx| {
+        println!("Resending tx {:?}", &tx);
+        TransactionProto {
+            transaction: tx.serialize(),
+        }
+    });
+
+    if let Err(e) = client.submit_transaction_stream(stream).await {
+        println!("Failed to send transaction: {e}");
+        // FIXME: Not sure why this keeps happening, ignore for now
+        // return Ok(());
     }
 
     println!(

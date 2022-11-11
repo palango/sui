@@ -4927,10 +4927,13 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "clap 2.34.0",
+ "futures",
  "narwhal-node",
+ "narwhal-types",
  "prost 0.11.0",
  "protobuf-src",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tonic-build",
  "workspace-hack",
