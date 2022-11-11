@@ -28,7 +28,7 @@ use node::blockchain::{Block, ExecutionError, Transaction as ChainTx};
 // Assumption that each transaction costs 1 gas to complete
 // Chose this number because it allows demo to complete round + get extra collections when proposing block.
 const BLOCK_GAS_LIMIT: u32 = 1_000_000;
-const LEVELS_PER_BLOCK: u32 = 2;
+const LEVELS_PER_BLOCK: u64 = 2;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -112,14 +112,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let oldest_round = rounds_response.oldest_round;
     let newest_round = rounds_response.newest_round;
-    let mut round = oldest_round + 1;
+    // let mut round = oldest_round + 1;
+    let mut round = LEVELS_PER_BLOCK;
     let mut last_completed_round = round;
 
     println!("\n2) Find collections from earliest round and continue to add collections until gas limit is hit\n");
     let mut block_proposal_collection_ids = Vec::new();
     let mut extra_collections = Vec::new();
     while round <= newest_round {
-        let proposer_public_key = get_proposer_for_block(round, base64_keys.clone(), narwhal_nodes);
+        let proposer_public_key = get_proposer_for_block(round/LEVELS_PER_BLOCK, base64_keys.clone(), narwhal_nodes);
 
         let node_read_causal_request = NodeReadCausalRequest {
             public_key: Some(PublicKey {
@@ -213,37 +214,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 last_completed_round = round - 1;
             }
 
-            block_proposal_collection_ids.extend(new_collections);
+            block_proposal_collection_ids.extend(new_collections.clone());
 
             println!("\t\tDeduped {:?} collections\n", duplicate_collection_count);
+
+            println!("\n\t\t2c) Remove collections that have been used for the block.\n");
+    
+            let remove_collections_request = RemoveCollectionsRequest {
+                collection_ids: new_collections.clone(),
+            };
+        
+            println!("\t{}\n", remove_collections_request);
+        
+            let request = tonic::Request::new(remove_collections_request);
+            let response = validator_client_1.remove_collections(request).await;
+            if response.is_ok() {
+                println!("\tSuccessfully removed committed collections\n");
+            } else {
+                println!("\tWas not able to remove committed collections\n");
+            }
         } else {
             println!("\tError trying to node read causal at round {round}\n")
         }
-        if block_full {
-            println!("\t\t***********************************************************************");
-            println!(
-                "\t\t* Will not continue on more rounds as gas limit {} has been reached",
-                current_block.gas_limit
-            );
-            println!(
-                "\t\tFinalized block {} with state hash {:x}",
-                current_block.number,
-                current_block.root()
-            );
-            println!(
-                "\t\tThere were {} transactions which failed to execute, adding them back to narwhal",
-                failed_txs.len()
-            );
-            println!("\t\t***********************************************************************");
-            break;
-        } else {
-            round += 1;
-        }
+        // if block_full {
+        println!("\t\t=====================================================================");
+        // println!(
+        //     "\t\t* Will not continue on more rounds as gas limit {} has been reached",
+        //     current_block.gas_limit
+        // );
+        println!(
+            "\t\tFinalized block {}\n\t\t\twith state hash {:x},\n\t\t\tgas limit {},\n\t\t\tgas used {},\n\t\t\t# txs {}, \n\t\t\tlast hash {:x}",
+            current_block.number,
+            current_block.root(),
+            current_block.gas_limit,
+            current_block.gas_used,
+            current_block.transactions.len(),
+            current_block.last_hash
+        );
+        println!(
+            "\t\tThere were {} transactions which failed to execute, adding them back to narwhal",
+            failed_txs.len()
+        );
+        println!("\t\t=====================================================================");
+        //     break;
+        // } else {
+        //     round += 1;
+        // }
+        current_block = current_block.next();
+        round += LEVELS_PER_BLOCK;
     }
 
-    if round > newest_round {
-        last_completed_round = newest_round;
-    }
+    // if round > newest_round {
+    //     last_completed_round = newest_round;
+    // }
 
     println!("\n2b2) Adding back failed transactions back to narwhal.\n");
     println!("---- Use TransactionClient.SubmitTransactionStream endpoint ----\n");
@@ -264,169 +287,169 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // return Ok(());
     }
 
-    println!(
-        "\n2c) Find the first collection returned from node read causal for fully completed round {last_completed_round} before gas limit was reached.\n"
-    );
-    println!("---- Use NodeReadCausal endpoint ----\n");
+    // println!(
+    //     "\n2c) Find the first collection returned from node read causal for fully completed round {last_completed_round} before gas limit was reached.\n"
+    // );
+    // println!("---- Use NodeReadCausal endpoint ----\n");
 
-    let mut block_proposal_starting_collection: Option<CertificateDigest> = None;
+    // let mut block_proposal_starting_collection: Option<CertificateDigest> = None;
 
-    while block_proposal_starting_collection.is_none() {
-        let proposer_public_key = get_proposer_for_block(last_completed_round, base64_keys.clone(), narwhal_nodes);
+    // while block_proposal_starting_collection.is_none() {
+    //     let proposer_public_key = get_proposer_for_block(last_completed_round, base64_keys.clone(), narwhal_nodes);
 
-        let node_read_causal_request = NodeReadCausalRequest {
-            public_key: Some(PublicKey {
-                bytes: proposer_public_key.clone(),
-            }),
-            round: last_completed_round,
-        };
+    //     let node_read_causal_request = NodeReadCausalRequest {
+    //         public_key: Some(PublicKey {
+    //             bytes: proposer_public_key.clone(),
+    //         }),
+    //         round: last_completed_round,
+    //     };
 
-        println!("\t{}\n", node_read_causal_request);
+    //     println!("\t{}\n", node_read_causal_request);
 
-        let request = tonic::Request::new(node_read_causal_request);
-        let response = proposer_client_1.node_read_causal(request).await;
+    //     let request = tonic::Request::new(node_read_causal_request);
+    //     let response = proposer_client_1.node_read_causal(request).await;
 
-        if let Some(node_read_causal_response) = println_and_into_inner(response) {
-            block_proposal_starting_collection =
-                Some(node_read_causal_response.collection_ids[0].clone());
-            // NodeReadCausal here will return the expected order of collections for validation versus the deduping we did in our search above.
-            block_proposal_collection_ids = node_read_causal_response.collection_ids.clone();
-            block_proposal_collection_ids.extend(extra_collections.clone());
-        } else {
-            println!("\tError trying to node read causal at round {last_completed_round} going back another round and retrying...\n");
-            last_completed_round -= 1;
-        }
-    }
+    //     if let Some(node_read_causal_response) = println_and_into_inner(response) {
+    //         block_proposal_starting_collection =
+    //             Some(node_read_causal_response.collection_ids[0].clone());
+    //         // NodeReadCausal here will return the expected order of collections for validation versus the deduping we did in our search above.
+    //         block_proposal_collection_ids = node_read_causal_response.collection_ids.clone();
+    //         block_proposal_collection_ids.extend(extra_collections.clone());
+    //     } else {
+    //         println!("\tError trying to node read causal at round {last_completed_round} going back another round and retrying...\n");
+    //         last_completed_round -= 1;
+    //     }
+    // }
 
-    let block_proposal_starting_collection = block_proposal_starting_collection.unwrap();
+    // let block_proposal_starting_collection = block_proposal_starting_collection.unwrap();
 
-    println!(
-        "\n\tProposing a block with {} collections starting from collection {block_proposal_starting_collection}!\n",
-        block_proposal_collection_ids.len()
-    );
+    // println!(
+    //     "\n\tProposing a block with {} collections starting from collection {block_proposal_starting_collection}!\n",
+    //     block_proposal_collection_ids.len()
+    // );
 
-    println!(
-        "\tBroadcasting block proposal with starting certificate `H` {block_proposal_starting_collection} from round {last_completed_round} in DAG + {} extra collections that fit in the block proposal.", extra_collections.len()
-    );
-    println!("\tValidators should call ReadCausal(H) which will return [collections] and call GetCollections([collections] + [{} extra_collections]) ", extra_collections.len());
+    // println!(
+    //     "\tBroadcasting block proposal with starting certificate `H` {block_proposal_starting_collection} from round {last_completed_round} in DAG + {} extra collections that fit in the block proposal.", extra_collections.len()
+    // );
+    // println!("\tValidators should call ReadCausal(H) which will return [collections] and call GetCollections([collections] + [{} extra_collections]) ", extra_collections.len());
 
-    println!(
-        "\n******************************** Validator Service ********************************\n"
-    );
-    let other_validator = if dsts.len() > 1 {
-        dsts[1].clone()
-    } else {
-        // we're probably running the docker command with a single endpoint
-        dsts[0].clone()
-    };
-    println!("\nConnecting to {other_validator} as the validator");
-    let mut validator_client_2 = ValidatorClient::connect(other_validator).await?;
+    // println!(
+    //     "\n******************************** Validator Service ********************************\n"
+    // );
+    // let other_validator = if dsts.len() > 1 {
+    //     dsts[1].clone()
+    // } else {
+    //     // we're probably running the docker command with a single endpoint
+    //     dsts[0].clone()
+    // };
+    // println!("\nConnecting to {other_validator} as the validator");
+    // let mut validator_client_2 = ValidatorClient::connect(other_validator).await?;
 
-    println!(
-        "\n3) Find all causal collections from the starting collection {block_proposal_starting_collection} in block proposal.\n",
-    );
-    println!("\n\t---- Use ReadCausal endpoint ----\n");
+    // println!(
+    //     "\n3) Find all causal collections from the starting collection {block_proposal_starting_collection} in block proposal.\n",
+    // );
+    // println!("\n\t---- Use ReadCausal endpoint ----\n");
 
-    let mut block_validation_collection_ids = Vec::new();
-    let read_causal_request = ReadCausalRequest {
-        collection_id: Some(block_proposal_starting_collection),
-    };
+    // let mut block_validation_collection_ids = Vec::new();
+    // let read_causal_request = ReadCausalRequest {
+    //     collection_id: Some(block_proposal_starting_collection),
+    // };
 
-    println!("\t{}\n", read_causal_request);
+    // println!("\t{}\n", read_causal_request);
 
-    let request = tonic::Request::new(read_causal_request);
-    let response = validator_client_2.read_causal(request).await;
-    let read_causal_response = response.unwrap().into_inner();
+    // let request = tonic::Request::new(read_causal_request);
+    // let response = validator_client_2.read_causal(request).await;
+    // let read_causal_response = response.unwrap().into_inner();
 
-    println!("\t{}\n", read_causal_response);
+    // println!("\t{}\n", read_causal_response);
 
-    block_validation_collection_ids.extend(read_causal_response.collection_ids);
+    // block_validation_collection_ids.extend(read_causal_response.collection_ids);
 
-    println!("\tFound {} collections from read causal which will be combined with the {} extra collections from the block proposal\n", block_validation_collection_ids.len(), extra_collections.len());
+    // println!("\tFound {} collections from read causal which will be combined with the {} extra collections from the block proposal\n", block_validation_collection_ids.len(), extra_collections.len());
 
-    block_validation_collection_ids.extend(extra_collections);
+    // block_validation_collection_ids.extend(extra_collections);
 
-    println!("\tProposed block included the following collections before compressing proposal:\n");
-    let mut result = "\t\t*** Block Proposal Collections ***".to_string();
-    for id in block_proposal_collection_ids.clone() {
-        result = format!("{}\n\t\t|-id=\"{}\"", result, id);
-    }
-    println!("{}", result);
+    // println!("\tProposed block included the following collections before compressing proposal:\n");
+    // let mut result = "\t\t*** Block Proposal Collections ***".to_string();
+    // for id in block_proposal_collection_ids.clone() {
+    //     result = format!("{}\n\t\t|-id=\"{}\"", result, id);
+    // }
+    // println!("{}", result);
 
-    println!(
-        "\n\tBlock validation found the following collections after decompressing proposal:\n"
-    );
-    let mut result = "\t\t*** Block Validation Collections ***".to_string();
-    for id in block_validation_collection_ids.clone() {
-        result = format!("{}\n\t\t|-id=\"{}\"", result, id);
-    }
-    println!("{}", result);
+    // println!(
+    //     "\n\tBlock validation found the following collections after decompressing proposal:\n"
+    // );
+    // let mut result = "\t\t*** Block Validation Collections ***".to_string();
+    // for id in block_validation_collection_ids.clone() {
+    //     result = format!("{}\n\t\t|-id=\"{}\"", result, id);
+    // }
+    // println!("{}", result);
 
-    // We're comparing `block_validation_collection_ids` which is a validator determined artifact,
-    // and `block_proposal_collection_ids` which is a proposer artifact. In production, the
-    // consensus would not have access to that second artifact at any node but the proposer,
-    // we are only show this here for didactic purposes.
-    if block_proposal_collection_ids == block_validation_collection_ids {
-        println!("\n\tThey match in value and order! Moving on to find the transactions...\n");
-    } else {
-        println!("\n\tThey dont match! Aborting...\n");
-        return Ok(());
-    }
+    // // We're comparing `block_validation_collection_ids` which is a validator determined artifact,
+    // // and `block_proposal_collection_ids` which is a proposer artifact. In production, the
+    // // consensus would not have access to that second artifact at any node but the proposer,
+    // // we are only show this here for didactic purposes.
+    // if block_proposal_collection_ids == block_validation_collection_ids {
+    //     println!("\n\tThey match in value and order! Moving on to find the transactions...\n");
+    // } else {
+    //     println!("\n\tThey dont match! Aborting...\n");
+    //     return Ok(());
+    // }
 
-    println!(
-        "\n4) Obtain the data payload for {} collections in block proposal.\n",
-        block_validation_collection_ids.len()
-    );
+    // println!(
+    //     "\n4) Obtain the data payload for {} collections in block proposal.\n",
+    //     block_validation_collection_ids.len()
+    // );
 
-    println!("\n\t---- Use GetCollections endpoint ----\n");
+    // println!("\n\t---- Use GetCollections endpoint ----\n");
 
-    let get_collections_request = GetCollectionsRequest {
-        collection_ids: block_validation_collection_ids.clone(),
-    };
+    // let get_collections_request = GetCollectionsRequest {
+    //     collection_ids: block_validation_collection_ids.clone(),
+    // };
 
-    println!("\t{}\n", get_collections_request);
+    // println!("\t{}\n", get_collections_request);
 
-    let request = tonic::Request::new(get_collections_request);
-    let response = validator_client_2.get_collections(request).await;
-    let get_collection_response = response.unwrap().into_inner();
+    // let request = tonic::Request::new(get_collections_request);
+    // let response = validator_client_2.get_collections(request).await;
+    // let get_collection_response = response.unwrap().into_inner();
 
-    println!("\t{}\n", get_collection_response);
+    // println!("\t{}\n", get_collection_response);
 
-    let (total_num_of_transactions, total_transactions_size, _txs) =
-        get_total_transaction_count_and_size(get_collection_response.result.clone());
+    // let (total_num_of_transactions, total_transactions_size, _txs) =
+    //     get_total_transaction_count_and_size(get_collection_response.result.clone());
 
-    // TODO: This doesn't work in Docker yet, figure out why
-    println!("\tFound {total_num_of_transactions} transactions with a total size of {total_transactions_size} bytes\n");
+    // // TODO: This doesn't work in Docker yet, figure out why
+    // println!("\tFound {total_num_of_transactions} transactions with a total size of {total_transactions_size} bytes\n");
 
-    println!("\tWaiting for validators to decide whether to vote for the block...\n");
-    println!("\tVote completed successfully, block can be removed!\n");
+    // println!("\tWaiting for validators to decide whether to vote for the block...\n");
+    // println!("\tVote completed successfully, block can be removed!\n");
 
-    println!("\n4) Remove collections that have been voted on and committed.\n");
-    println!("\n\t---- Test RemoveCollections endpoint ----\n");
+    // println!("\n4) Remove collections that have been voted on and committed.\n");
+    // println!("\n\t---- Test RemoveCollections endpoint ----\n");
 
-    let remove_collections_request = RemoveCollectionsRequest {
-        collection_ids: block_validation_collection_ids.clone(),
-    };
+    // let remove_collections_request = RemoveCollectionsRequest {
+    //     collection_ids: block_validation_collection_ids.clone(),
+    // };
 
-    println!("\t{}\n", remove_collections_request);
+    // println!("\t{}\n", remove_collections_request);
 
-    let request = tonic::Request::new(remove_collections_request);
-    let response = validator_client_2.remove_collections(request).await;
-    if response.is_ok() {
-        println!("\tSuccessfully removed committed collections\n");
-    } else {
-        println!("\tWas not able to remove committed collections\n");
-    }
-
+    // let request = tonic::Request::new(remove_collections_request);
+    // let response = validator_client_2.remove_collections(request).await;
+    // if response.is_ok() {
+    //     println!("\tSuccessfully removed committed collections\n");
+    // } else {
+    //     println!("\tWas not able to remove committed collections\n");
+    // }
+    println!("\n\tEverything it's ok babe!\n");
     Ok(())
 }
 
 fn get_proposer_for_block(
-    blockNumber: u64,
+    block_number: u64,
     base64_keys: Vec<String>,
     validators: u64
 ) -> Vec<u8> {
-    return base64::decode(&base64_keys[(blockNumber % validators) as usize]).unwrap();
+    return base64::decode(&base64_keys[(block_number % validators) as usize]).unwrap();
 }
 
 fn get_total_transaction_count_and_size(

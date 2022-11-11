@@ -89,6 +89,7 @@ pub struct Block {
     pub state: State,
     pub gas_used: Gas,
     pub gas_limit: Gas,
+    pub last_hash: u64
 }
 
 pub enum ExecutionError {
@@ -104,6 +105,7 @@ impl Block {
             state: State::new(),
             gas_used: 0,
             gas_limit: gas_limit,
+            last_hash: 0
         }
     }
 
@@ -114,6 +116,7 @@ impl Block {
             state: self.state.clone(),
             gas_used: 0,
             gas_limit: self.gas_limit,
+            last_hash: self.root()
         }
     }
 
@@ -133,6 +136,7 @@ impl Block {
 
     pub fn root(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
+        self.last_hash.hash(&mut hasher);
         self.number.hash(&mut hasher);
         self.transactions.hash(&mut hasher);
         self.state.hash(&mut hasher);
