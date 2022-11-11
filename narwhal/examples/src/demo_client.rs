@@ -28,6 +28,7 @@ use node::blockchain::{Block, ExecutionError, Transaction as ChainTx};
 // Assumption that each transaction costs 1 gas to complete
 // Chose this number because it allows demo to complete round + get extra collections when proposing block.
 const BLOCK_GAS_LIMIT: u32 = 1_000_000;
+const LEVELS_PER_BLOCK: u32 = 2;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -80,6 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut current_block = Block::genesis(BLOCK_GAS_LIMIT as u32).next();
     let mut block_full = false;
     let mut failed_txs = Vec::new();
+    let narwhal_nodes = 4;
 
     println!(
         "******************************** Proposer Service ********************************\n"
@@ -87,7 +89,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nConnecting to {} as the proposer.", dsts[0]);
     let mut proposer_client_1 = ProposerClient::connect(dsts[0].clone()).await?;
     let mut validator_client_1 = ValidatorClient::connect(dsts[0].clone()).await?;
-    let public_key = base64::decode(&base64_keys[0]).unwrap();
+    // let public_key = base64::decode(&base64_keys[0]).unwrap();
+    // let public_key = get_proposer_for_block(0, base64_keys);
 
     println!("\n1) Retrieve the range of rounds you have a collection for");
     println!("\n\t---- Use Rounds endpoint ----\n");
@@ -95,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Q: Why is this for a specific validator?
     let rounds_request = RoundsRequest {
         public_key: Some(PublicKey {
-            bytes: public_key.clone(),
+            bytes: get_proposer_for_block(0, base64_keys.clone(), narwhal_nodes).clone(),
         }),
     };
 
@@ -116,9 +119,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut block_proposal_collection_ids = Vec::new();
     let mut extra_collections = Vec::new();
     while round <= newest_round {
+        let proposer_public_key = get_proposer_for_block(round, base64_keys.clone(), narwhal_nodes);
+
         let node_read_causal_request = NodeReadCausalRequest {
             public_key: Some(PublicKey {
-                bytes: public_key.clone(),
+                bytes: proposer_public_key,
             }),
             round,
         };
@@ -267,9 +272,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut block_proposal_starting_collection: Option<CertificateDigest> = None;
 
     while block_proposal_starting_collection.is_none() {
+        let proposer_public_key = get_proposer_for_block(last_completed_round, base64_keys.clone(), narwhal_nodes);
+
         let node_read_causal_request = NodeReadCausalRequest {
             public_key: Some(PublicKey {
-                bytes: public_key.clone(),
+                bytes: proposer_public_key.clone(),
             }),
             round: last_completed_round,
         };
@@ -412,6 +419,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn get_proposer_for_block(
+    blockNumber: u64,
+    base64_keys: Vec<String>,
+    validators: u64
+) -> Vec<u8> {
+    return base64::decode(&base64_keys[(blockNumber % validators) as usize]).unwrap();
 }
 
 fn get_total_transaction_count_and_size(
