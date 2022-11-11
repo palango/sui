@@ -58,6 +58,7 @@ class Demo:
             subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
             sleep(0.5)  # Removing the store may take time.
 
+            Print.info('Recompile...')
             # Recompile the latest code.
             cmd = CommandMaker.compile(mem_profiling=self.mem_profile)
             subprocess.run(cmd, check=True, cwd=PathMaker.node_crate_path())
@@ -66,6 +67,7 @@ class Demo:
             subprocess.run(cmd, check=True,
                            cwd=PathMaker.examples_crate_path())
 
+            Print.info('Binary aliases...')
             # Create alias for the client and nodes binary.
             cmd = CommandMaker.alias_binaries(PathMaker.binary_path())
             subprocess.run([cmd], shell=True)
@@ -73,6 +75,7 @@ class Demo:
             cmd = CommandMaker.alias_demo_binaries(PathMaker.binary_path())
             subprocess.run([cmd], shell=True)
 
+            Print.info('Configuration files...')
             # Generate configuration files.
             primary_keys = []
             primary_key_files = [
@@ -163,6 +166,7 @@ class Demo:
             Print.info(
                 f'Seeding the testbed with transactions ({self.duration} sec)...')
 
+            sleep(1)
             # Parse logs and return the parser.
             Print.info('Parsing logs...')
             port_logs = LogGrpcParser.process(
@@ -173,6 +177,7 @@ class Demo:
             ports = [int(port) for port in port_logs.grpc_ports]
             sleep(self.duration)
 
+            Print.info('Running demo client...')
             cmd = CommandMaker.run_demo_client(primary_names,  ports)
             self.demo_log_path = PathMaker.demo_client_log_file()
             self._background_run_with_stdout(cmd, self.demo_log_path)
