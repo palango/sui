@@ -213,6 +213,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "\t\t* Will not continue on more rounds as gas limit {} has been reached",
                 current_block.gas_limit
             );
+            println!(
+                "\t\tFinalized block {} with state hash {:x}",
+                current_block.number,
+                current_block.root()
+            );
             println!("\t\t***********************************************************************");
             break;
         } else {
