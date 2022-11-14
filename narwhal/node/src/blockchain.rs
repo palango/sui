@@ -89,7 +89,7 @@ pub struct Block {
     pub state: State,
     pub gas_used: Gas,
     pub gas_limit: Gas,
-    pub last_hash: u64
+    pub last_hash: u64,
 }
 
 pub enum ExecutionError {
@@ -105,7 +105,7 @@ impl Block {
             state: State::new(),
             gas_used: 0,
             gas_limit: gas_limit,
-            last_hash: 0
+            last_hash: 0,
         }
     }
 
@@ -116,7 +116,7 @@ impl Block {
             state: self.state.clone(),
             gas_used: 0,
             gas_limit: self.gas_limit,
-            last_hash: self.root()
+            last_hash: self.root(),
         }
     }
 
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn block_creation() {
-        let genesis = Block::genesis();
+        let genesis = Block::genesis(20);
 
         let m = Transaction::Mint(Mint {
             to: ALICE,
@@ -316,7 +316,7 @@ mod tests {
         let mut mint_ser = mint.serialize();
         assert_eq!(
             mint_ser,
-            b"\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x64"[..]
+            b"\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x64\x00\x00\x00\x02"[..]
         );
 
         let mint_deser = Transaction::deserialize(&mut mint_ser);
@@ -331,7 +331,7 @@ mod tests {
         let mut transf_ser = transf.serialize();
         assert_eq!(
             transf_ser,
-            b"\x01\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x63"[..]
+            b"\x01\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x63\x00\x00\x00\x02"[..]
         );
 
         let transf_deser = Transaction::deserialize(&mut transf_ser);
