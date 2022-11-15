@@ -62,10 +62,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .setting(AppSettings::SubcommandRequiredElseHelp)
         .get_matches();
-        
-        let mut dsts = Vec::new();
-        let mut base64_keys = Vec::new();
-        let mut client: usize = 0;
+
+    let mut dsts = Vec::new();
+    let mut base64_keys = Vec::new();
+    let mut client: usize = 0;
     match matches.subcommand() {
         ("run", Some(sub_matches)) => {
             let ports = sub_matches
@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => unreachable!(),
     }
     println!("Client {}!", client);
-    
+
     let mut current_block = Block::genesis(BLOCK_GAS_LIMIT as u32).next();
     let narwhal_nodes = base64_keys.len() as u64;
 
@@ -131,7 +131,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut block_proposal_collection_ids = Vec::new();
     // let mut extra_collections = Vec::new();
     while round <= newest_round {
-        let proposer_public_key = get_proposer_for_block(round/LEVELS_PER_BLOCK, base64_keys.clone(), narwhal_nodes);
+        let proposer_public_key =
+            get_proposer_for_block(round / LEVELS_PER_BLOCK, base64_keys.clone(), narwhal_nodes);
         let mut block_full = false;
         let mut failed_txs = Vec::new();
         let mut gas_overload_txs = Vec::new();
@@ -226,13 +227,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Used to check multi clients if client == 0 {
             println!("\n\t\t2c) Remove collections that have been used for the block.\n");
-    
+
             let remove_collections_request = RemoveCollectionsRequest {
                 collection_ids: new_collections.clone(),
             };
-        
+
             println!("\t{}\n", remove_collections_request);
-        
+
             let request = tonic::Request::new(remove_collections_request);
             let response = validator_client.remove_collections(request).await;
             if response.is_ok() {
@@ -246,20 +247,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Readd AND just the proposer
-        if RE_ADD_TXS && round/LEVELS_PER_BLOCK % narwhal_nodes == (client as u64) {
+        if RE_ADD_TXS && round / LEVELS_PER_BLOCK % narwhal_nodes == (client as u64) {
             println!("\n2b2) Adding back failed transactions back to narwhal.\n");
             println!("---- Use TransactionClient.SubmitTransactionStream endpoint ----\n");
             // Connect to the mempool.
             let mut client = TransactionsClient::connect(dsts[client].clone())
                 .await
                 .expect("Could not create TransactionsClient");
-            let stream = tokio_stream::iter([failed_txs.clone(), gas_overload_txs.clone()].concat()).map(move |tx| {
+            let stream = tokio_stream::iter(
+                [failed_txs.clone(), gas_overload_txs.clone()].concat(),
+            )
+            .map(move |tx| {
                 println!("Resending tx {:?}", &tx);
                 TransactionProto {
                     transaction: tx.serialize(),
                 }
             });
-        
+
             if let Err(e) = client.submit_transaction_stream(stream).await {
                 println!("Failed to send transaction: {e}");
                 // FIXME: Not sure why this keeps happening, ignore for now
@@ -297,11 +301,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn get_proposer_for_block(
-    block_number: u64,
-    base64_keys: Vec<String>,
-    validators: u64
-) -> Vec<u8> {
+fn get_proposer_for_block(block_number: u64, base64_keys: Vec<String>, validators: u64) -> Vec<u8> {
     return base64::decode(&base64_keys[(block_number % validators) as usize]).unwrap();
 }
 

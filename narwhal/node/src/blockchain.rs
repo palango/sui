@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::{
     collections::{btree_map::Entry, hash_map::DefaultHasher, BTreeMap},
@@ -331,7 +333,8 @@ mod tests {
         let mut transf_ser = transf.serialize();
         assert_eq!(
             transf_ser,
-            b"\x01\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x63\x00\x00\x00\x02"[..]
+            b"\x01\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x63\x00\x00\x00\x02"
+                [..]
         );
 
         let transf_deser = Transaction::deserialize(&mut transf_ser);
