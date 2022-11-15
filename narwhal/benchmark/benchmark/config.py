@@ -296,6 +296,11 @@ class BenchParameters:
             else:
                 self.mem_profile = False
 
+            if 'client_per_node' in json:
+                self.client_per_node = bool(json['client_per_node'])
+            else:
+                self.client_per_node = False
+
             self.runs = int(json['runs']) if 'runs' in json else 1
         except KeyError as e:
             raise ConfigError(f'Malformed bench parameters: missing key {e}')

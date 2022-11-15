@@ -178,9 +178,17 @@ class Demo:
             sleep(self.duration)
 
             Print.info('Running demo client...')
-            cmd = CommandMaker.run_demo_client(primary_names,  ports)
-            self.demo_log_path = PathMaker.demo_client_log_file()
+            cmd = CommandMaker.run_demo_client(primary_names,  ports, 0)
+            self.demo_log_path = PathMaker.demo_client_log_file(0)
             self._background_run_with_stdout(cmd, self.demo_log_path)
+            # Run without stdout the other clients if necessary
+            if self.client_per_node and len(primary_names) > 1:
+                for i in range(len(primary_names)):
+                    Print.info(f'Running demo client {i}')
+                    if i > 0:
+                        cmd = CommandMaker.run_demo_client(primary_names, ports, i)
+                        log_file = PathMaker.demo_client_log_file(i)
+                        self._background_run_with_stdout(cmd, log_file)
             # ironically, it takes a *while* to get data from gRPC
             sleep(10)
             self._kill_nodes()

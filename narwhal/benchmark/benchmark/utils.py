@@ -85,8 +85,8 @@ class PathMaker:
         return join(PathMaker.logs_path(), f'client-{i}-{j}.log')
 
     @staticmethod
-    def demo_client_log_file():
-        return join(PathMaker.logs_path(), 'demo_client.log')
+    def demo_client_log_file(i):
+        return join(PathMaker.logs_path(), f'demo_client-{i}.log')
 
     @staticmethod
     def results_path():

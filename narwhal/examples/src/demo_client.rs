@@ -27,8 +27,9 @@ use node::blockchain::{Block, ExecutionError, Transaction as ChainTx};
 
 // Assumption that each transaction costs 1 gas to complete
 // Chose this number because it allows demo to complete round + get extra collections when proposing block.
-const BLOCK_GAS_LIMIT: u32 = 1_000_000;
+const BLOCK_GAS_LIMIT: u32 = 100_000;
 const LEVELS_PER_BLOCK: u64 = 2;
+const RE_ADD_TXS: bool = false;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -51,13 +52,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .help("The ports on localhost where to reach the grpc server")
                         .use_delimiter(true)
                         .min_values(2),
+                )
+                .arg(
+                    Arg::with_name("client-index")
+                        .long("client-index")
+                        .help("The client number")
+                        .min_values(1),
                 ),
         )
         .setting(AppSettings::SubcommandRequiredElseHelp)
         .get_matches();
-
-    let mut dsts = Vec::new();
-    let mut base64_keys = Vec::new();
+        
+        let mut dsts = Vec::new();
+        let mut base64_keys = Vec::new();
+        let mut client: usize = 0;
     match matches.subcommand() {
         ("run", Some(sub_matches)) => {
             let ports = sub_matches
@@ -74,21 +82,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             for key in keys {
                 base64_keys.push(key.to_owned())
             }
+            let client_aux = sub_matches
+                .value_of("client-index")
+                .expect("Invalid client number specified");
+            client = client_aux.parse::<i32>().unwrap() as usize;
         }
         _ => unreachable!(),
     }
-
+    println!("Client {}!", client);
+    
     let mut current_block = Block::genesis(BLOCK_GAS_LIMIT as u32).next();
-    let mut block_full = false;
-    let mut failed_txs = Vec::new();
-    let narwhal_nodes = 4;
+    let narwhal_nodes = base64_keys.len() as u64;
 
     println!(
         "******************************** Proposer Service ********************************\n"
     );
-    println!("\nConnecting to {} as the proposer.", dsts[0]);
-    let mut proposer_client_1 = ProposerClient::connect(dsts[0].clone()).await?;
-    let mut validator_client_1 = ValidatorClient::connect(dsts[0].clone()).await?;
+    println!("\nConnecting to {} as the proposer.", dsts[client]);
+    let mut proposer_client = ProposerClient::connect(dsts[client].clone()).await?;
+    let mut validator_client = ValidatorClient::connect(dsts[client].clone()).await?;
     // let public_key = base64::decode(&base64_keys[0]).unwrap();
     // let public_key = get_proposer_for_block(0, base64_keys);
 
@@ -98,29 +109,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Q: Why is this for a specific validator?
     let rounds_request = RoundsRequest {
         public_key: Some(PublicKey {
-            bytes: get_proposer_for_block(0, base64_keys.clone(), narwhal_nodes).clone(),
+            bytes: get_proposer_for_block(0, base64_keys.clone(), narwhal_nodes as u64).clone(),
         }),
     };
 
     println!("\t{}\n", rounds_request);
 
     let request = tonic::Request::new(rounds_request);
-    let response = proposer_client_1.rounds(request).await;
+    let response = proposer_client.rounds(request).await;
     let rounds_response = response.unwrap().into_inner();
 
     println!("\t{}\n", rounds_response);
 
-    let oldest_round = rounds_response.oldest_round;
+    // let oldest_round = rounds_response.oldest_round;
     let newest_round = rounds_response.newest_round;
     // let mut round = oldest_round + 1;
     let mut round = LEVELS_PER_BLOCK;
-    let mut last_completed_round = round;
+    // let mut last_completed_round = round;
 
     println!("\n2) Find collections from earliest round and continue to add collections until gas limit is hit\n");
     let mut block_proposal_collection_ids = Vec::new();
-    let mut extra_collections = Vec::new();
+    // let mut extra_collections = Vec::new();
     while round <= newest_round {
         let proposer_public_key = get_proposer_for_block(round/LEVELS_PER_BLOCK, base64_keys.clone(), narwhal_nodes);
+        let mut block_full = false;
+        let mut failed_txs = Vec::new();
+        let mut gas_overload_txs = Vec::new();
 
         let node_read_causal_request = NodeReadCausalRequest {
             public_key: Some(PublicKey {
@@ -136,7 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\t{}\n", node_read_causal_request);
 
         let request = tonic::Request::new(node_read_causal_request);
-        let response = proposer_client_1.node_read_causal(request).await;
+        let response = proposer_client.node_read_causal(request).await;
 
         if let Some(node_read_causal_response) = println_and_into_inner(response) {
             let mut duplicate_collection_count = 0;
@@ -157,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("\t\t{}\n", get_collections_request);
 
                     let request = tonic::Request::new(get_collections_request);
-                    let response = validator_client_1.get_collections(request).await;
+                    let response = validator_client.get_collections(request).await;
                     let get_collection_response = response.unwrap().into_inner();
 
                     let (total_num_of_transactions, total_transactions_size, txs) =
@@ -180,44 +194,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Store state for rollback in case of reaching gas limit
                     let start_block = current_block.clone();
                     for tx in decoded_txs {
-                        match current_block.try_apply_tx(&tx) {
-                            Err(ExecutionError::GasLimitReached) => {
-                                block_full = true;
-                                break;
+                        if block_full {
+                            gas_overload_txs.push(tx);
+                        } else {
+                            match current_block.try_apply_tx(&tx) {
+                                Err(ExecutionError::GasLimitReached) => {
+                                    block_full = true;
+                                    gas_overload_txs.push(tx);
+                                }
+                                Err(ExecutionError::InvalidTransaction) => {
+                                    failed_txs.push(tx);
+                                }
+                                _ => {}
                             }
-                            Err(ExecutionError::InvalidTransaction) => {
-                                failed_txs.push(tx);
-                            }
-                            _ => {}
                         }
                     }
 
                     println!("\t\tFound {total_num_of_transactions} transactions with a total size of {total_transactions_size} bytes");
 
-                    if !block_full {
-                        println!("\t\tAdding {total_num_of_transactions} transactions to the proposed block, increasing the block gas cost to {}", current_block.gas_used);
-                        new_collections.push(collection_id);
-                    } else {
-                        println!("\t\t*Not adding {total_num_of_transactions} transactions to the proposed block as it would increase the block gas cost above the block gas limit of {}", current_block.gas_limit);
-                        current_block = start_block;
-                        break;
-                    }
+                    new_collections.push(collection_id);
                 }
             }
-            if new_collections.len() + duplicate_collection_count != count_of_retrieved_collections
-            {
-                println!(
-                    "\t\tWe added {} extra collections to the block proposal from round {round}",
-                    new_collections.len()
-                );
-                extra_collections.extend(new_collections.clone());
-                last_completed_round = round - 1;
-            }
+            println!(
+                "\t\t {} collections were used in the block proposal from round {round}",
+                new_collections.len()
+            );
 
             block_proposal_collection_ids.extend(new_collections.clone());
 
             println!("\t\tDeduped {:?} collections\n", duplicate_collection_count);
 
+            // Used to check multi clients if client == 0 {
             println!("\n\t\t2c) Remove collections that have been used for the block.\n");
     
             let remove_collections_request = RemoveCollectionsRequest {
@@ -227,21 +234,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("\t{}\n", remove_collections_request);
         
             let request = tonic::Request::new(remove_collections_request);
-            let response = validator_client_1.remove_collections(request).await;
+            let response = validator_client.remove_collections(request).await;
             if response.is_ok() {
                 println!("\tSuccessfully removed committed collections\n");
             } else {
                 println!("\tWas not able to remove committed collections\n");
             }
+            //}
         } else {
             println!("\tError trying to node read causal at round {round}\n")
         }
-        // if block_full {
+
+        // Readd AND just the proposer
+        if RE_ADD_TXS && round/LEVELS_PER_BLOCK % narwhal_nodes == (client as u64) {
+            println!("\n2b2) Adding back failed transactions back to narwhal.\n");
+            println!("---- Use TransactionClient.SubmitTransactionStream endpoint ----\n");
+            // Connect to the mempool.
+            let mut client = TransactionsClient::connect(dsts[client].clone())
+                .await
+                .expect("Could not create TransactionsClient");
+            let stream = tokio_stream::iter([failed_txs.clone(), gas_overload_txs.clone()].concat()).map(move |tx| {
+                println!("Resending tx {:?}", &tx);
+                TransactionProto {
+                    transaction: tx.serialize(),
+                }
+            });
+        
+            if let Err(e) = client.submit_transaction_stream(stream).await {
+                println!("Failed to send transaction: {e}");
+                // FIXME: Not sure why this keeps happening, ignore for now
+                // return Ok(());
+            }
+        }
+
+        println!(
+            "\t\tThere were {} transactions which failed to execute",
+            failed_txs.len()
+        );
+        println!(
+            "\t\tThere were {} transactions which were not able to be part of the block",
+            gas_overload_txs.len()
+        );
+        if RE_ADD_TXS {
+            println!("\t\tAdding them back to narwhal");
+        }
+
         println!("\t\t=====================================================================");
-        // println!(
-        //     "\t\t* Will not continue on more rounds as gas limit {} has been reached",
-        //     current_block.gas_limit
-        // );
         println!(
             "\t\tFinalized block {}\n\t\t\twith state hash {:x},\n\t\t\tgas limit {},\n\t\t\tgas used {},\n\t\t\t# txs {}, \n\t\t\tlast hash {:x}",
             current_block.number,
@@ -251,195 +289,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             current_block.transactions.len(),
             current_block.last_hash
         );
-        println!(
-            "\t\tThere were {} transactions which failed to execute, adding them back to narwhal",
-            failed_txs.len()
-        );
         println!("\t\t=====================================================================");
-        //     break;
-        // } else {
-        //     round += 1;
-        // }
         current_block = current_block.next();
         round += LEVELS_PER_BLOCK;
     }
-
-    // if round > newest_round {
-    //     last_completed_round = newest_round;
-    // }
-
-    println!("\n2b2) Adding back failed transactions back to narwhal.\n");
-    println!("---- Use TransactionClient.SubmitTransactionStream endpoint ----\n");
-    // Connect to the mempool.
-    let mut client = TransactionsClient::connect(dsts[0].clone())
-        .await
-        .expect("Could not create TransactionsClient");
-    let stream = tokio_stream::iter(failed_txs).map(move |tx| {
-        println!("Resending tx {:?}", &tx);
-        TransactionProto {
-            transaction: tx.serialize(),
-        }
-    });
-
-    if let Err(e) = client.submit_transaction_stream(stream).await {
-        println!("Failed to send transaction: {e}");
-        // FIXME: Not sure why this keeps happening, ignore for now
-        // return Ok(());
-    }
-
-    // println!(
-    //     "\n2c) Find the first collection returned from node read causal for fully completed round {last_completed_round} before gas limit was reached.\n"
-    // );
-    // println!("---- Use NodeReadCausal endpoint ----\n");
-
-    // let mut block_proposal_starting_collection: Option<CertificateDigest> = None;
-
-    // while block_proposal_starting_collection.is_none() {
-    //     let proposer_public_key = get_proposer_for_block(last_completed_round, base64_keys.clone(), narwhal_nodes);
-
-    //     let node_read_causal_request = NodeReadCausalRequest {
-    //         public_key: Some(PublicKey {
-    //             bytes: proposer_public_key.clone(),
-    //         }),
-    //         round: last_completed_round,
-    //     };
-
-    //     println!("\t{}\n", node_read_causal_request);
-
-    //     let request = tonic::Request::new(node_read_causal_request);
-    //     let response = proposer_client_1.node_read_causal(request).await;
-
-    //     if let Some(node_read_causal_response) = println_and_into_inner(response) {
-    //         block_proposal_starting_collection =
-    //             Some(node_read_causal_response.collection_ids[0].clone());
-    //         // NodeReadCausal here will return the expected order of collections for validation versus the deduping we did in our search above.
-    //         block_proposal_collection_ids = node_read_causal_response.collection_ids.clone();
-    //         block_proposal_collection_ids.extend(extra_collections.clone());
-    //     } else {
-    //         println!("\tError trying to node read causal at round {last_completed_round} going back another round and retrying...\n");
-    //         last_completed_round -= 1;
-    //     }
-    // }
-
-    // let block_proposal_starting_collection = block_proposal_starting_collection.unwrap();
-
-    // println!(
-    //     "\n\tProposing a block with {} collections starting from collection {block_proposal_starting_collection}!\n",
-    //     block_proposal_collection_ids.len()
-    // );
-
-    // println!(
-    //     "\tBroadcasting block proposal with starting certificate `H` {block_proposal_starting_collection} from round {last_completed_round} in DAG + {} extra collections that fit in the block proposal.", extra_collections.len()
-    // );
-    // println!("\tValidators should call ReadCausal(H) which will return [collections] and call GetCollections([collections] + [{} extra_collections]) ", extra_collections.len());
-
-    // println!(
-    //     "\n******************************** Validator Service ********************************\n"
-    // );
-    // let other_validator = if dsts.len() > 1 {
-    //     dsts[1].clone()
-    // } else {
-    //     // we're probably running the docker command with a single endpoint
-    //     dsts[0].clone()
-    // };
-    // println!("\nConnecting to {other_validator} as the validator");
-    // let mut validator_client_2 = ValidatorClient::connect(other_validator).await?;
-
-    // println!(
-    //     "\n3) Find all causal collections from the starting collection {block_proposal_starting_collection} in block proposal.\n",
-    // );
-    // println!("\n\t---- Use ReadCausal endpoint ----\n");
-
-    // let mut block_validation_collection_ids = Vec::new();
-    // let read_causal_request = ReadCausalRequest {
-    //     collection_id: Some(block_proposal_starting_collection),
-    // };
-
-    // println!("\t{}\n", read_causal_request);
-
-    // let request = tonic::Request::new(read_causal_request);
-    // let response = validator_client_2.read_causal(request).await;
-    // let read_causal_response = response.unwrap().into_inner();
-
-    // println!("\t{}\n", read_causal_response);
-
-    // block_validation_collection_ids.extend(read_causal_response.collection_ids);
-
-    // println!("\tFound {} collections from read causal which will be combined with the {} extra collections from the block proposal\n", block_validation_collection_ids.len(), extra_collections.len());
-
-    // block_validation_collection_ids.extend(extra_collections);
-
-    // println!("\tProposed block included the following collections before compressing proposal:\n");
-    // let mut result = "\t\t*** Block Proposal Collections ***".to_string();
-    // for id in block_proposal_collection_ids.clone() {
-    //     result = format!("{}\n\t\t|-id=\"{}\"", result, id);
-    // }
-    // println!("{}", result);
-
-    // println!(
-    //     "\n\tBlock validation found the following collections after decompressing proposal:\n"
-    // );
-    // let mut result = "\t\t*** Block Validation Collections ***".to_string();
-    // for id in block_validation_collection_ids.clone() {
-    //     result = format!("{}\n\t\t|-id=\"{}\"", result, id);
-    // }
-    // println!("{}", result);
-
-    // // We're comparing `block_validation_collection_ids` which is a validator determined artifact,
-    // // and `block_proposal_collection_ids` which is a proposer artifact. In production, the
-    // // consensus would not have access to that second artifact at any node but the proposer,
-    // // we are only show this here for didactic purposes.
-    // if block_proposal_collection_ids == block_validation_collection_ids {
-    //     println!("\n\tThey match in value and order! Moving on to find the transactions...\n");
-    // } else {
-    //     println!("\n\tThey dont match! Aborting...\n");
-    //     return Ok(());
-    // }
-
-    // println!(
-    //     "\n4) Obtain the data payload for {} collections in block proposal.\n",
-    //     block_validation_collection_ids.len()
-    // );
-
-    // println!("\n\t---- Use GetCollections endpoint ----\n");
-
-    // let get_collections_request = GetCollectionsRequest {
-    //     collection_ids: block_validation_collection_ids.clone(),
-    // };
-
-    // println!("\t{}\n", get_collections_request);
-
-    // let request = tonic::Request::new(get_collections_request);
-    // let response = validator_client_2.get_collections(request).await;
-    // let get_collection_response = response.unwrap().into_inner();
-
-    // println!("\t{}\n", get_collection_response);
-
-    // let (total_num_of_transactions, total_transactions_size, _txs) =
-    //     get_total_transaction_count_and_size(get_collection_response.result.clone());
-
-    // // TODO: This doesn't work in Docker yet, figure out why
-    // println!("\tFound {total_num_of_transactions} transactions with a total size of {total_transactions_size} bytes\n");
-
-    // println!("\tWaiting for validators to decide whether to vote for the block...\n");
-    // println!("\tVote completed successfully, block can be removed!\n");
-
-    // println!("\n4) Remove collections that have been voted on and committed.\n");
-    // println!("\n\t---- Test RemoveCollections endpoint ----\n");
-
-    // let remove_collections_request = RemoveCollectionsRequest {
-    //     collection_ids: block_validation_collection_ids.clone(),
-    // };
-
-    // println!("\t{}\n", remove_collections_request);
-
-    // let request = tonic::Request::new(remove_collections_request);
-    // let response = validator_client_2.remove_collections(request).await;
-    // if response.is_ok() {
-    //     println!("\tSuccessfully removed committed collections\n");
-    // } else {
-    //     println!("\tWas not able to remove committed collections\n");
-    // }
     println!("\n\tEverything it's ok babe!\n");
     Ok(())
 }
