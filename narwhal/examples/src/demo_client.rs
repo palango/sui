@@ -133,6 +133,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while round <= newest_round {
         let proposer_public_key =
             get_proposer_for_block(round / LEVELS_PER_BLOCK, base64_keys.clone(), narwhal_nodes);
+        // NOTE: Uncomment to have every client getting their collections for each block
+        // let proposer_public_key = base64::decode(&base64_keys[client]).unwrap();
         let mut block_full = false;
         let mut failed_txs = Vec::new();
         let mut gas_overload_txs = Vec::new();
@@ -225,7 +227,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("\t\tDeduped {:?} collections\n", duplicate_collection_count);
 
-            // Used to check multi clients if client == 0 {
+            // NOTE: uncomment to prune only the collections of the client zero
+            // if client == 0 {
             println!("\n\t\t2c) Remove collections that have been used for the block.\n");
 
             let remove_collections_request = RemoveCollectionsRequest {
@@ -246,7 +249,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("\tError trying to node read causal at round {round}\n")
         }
 
-        // Readd AND just the proposer
+        // Re-add AND just the proposer
         if RE_ADD_TXS && round / LEVELS_PER_BLOCK % narwhal_nodes == (client as u64) {
             println!("\n2b2) Adding back failed transactions back to narwhal.\n");
             println!("---- Use TransactionClient.SubmitTransactionStream endpoint ----\n");
