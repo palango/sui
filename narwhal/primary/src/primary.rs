@@ -475,7 +475,7 @@ impl Primary {
             P2pNetwork::new(network.clone()),
         );
 
-        let consensus_api_handle = if !internal_consensus {
+        let consensus_api_handle = if true {
             // Retrieves a block's data by contacting the worker nodes that contain the
             // underlying batches and their transactions.
             let block_waiter_primary_network = P2pNetwork::new(network.clone());
