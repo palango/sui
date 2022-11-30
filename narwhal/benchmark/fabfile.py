@@ -21,6 +21,8 @@ def local(ctx, debug=True):
         'rate': 50_000,
         'tx_size': 512,
         'duration': 20,
+        'blocks_to_run': 50,
+        'rounds_per_block': 2,
         'mem_profiling': False
     }
     node_params = {
@@ -72,6 +74,8 @@ def demo(ctx, debug=True):
         'tx_size': 512,
         'duration': 10,
         'mem_profiling': False,
+        'blocks_to_run': 10,
+        'rounds_per_block': 5,
         'client_per_node': True
     }
     node_params = {
@@ -125,6 +129,8 @@ def seed(ctx, starting_data_port):
         'tx_size': 512,
         'duration': 20,
         'mem_profiling': False,
+        'blocks_to_run': 50,
+        'rounds_per_block': 2,
         'client_per_node': False
     }
     try:
@@ -200,6 +206,8 @@ def remote(ctx, debug=False):
         'duration': 300,
         'runs': 2,
         'mem_profiling': False,
+        'blocks_to_run': 750,
+        'rounds_per_block': 2,
         'client_per_node': False
     }
     node_params = {

@@ -301,6 +301,16 @@ class BenchParameters:
             else:
                 self.client_per_node = False
 
+            if 'blocks_to_run' in json:
+                self.blocks_to_run = int(json['blocks_to_run'])
+            else:
+                self.blocks_to_run = 1
+            
+            if 'rounds_per_block' in json:
+                self.rounds_per_block = int(json['rounds_per_block'])
+            else:
+                self.rounds_per_block = 1
+
             self.runs = int(json['runs']) if 'runs' in json else 1
         except KeyError as e:
             raise ConfigError(f'Malformed bench parameters: missing key {e}')

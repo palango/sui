@@ -16,7 +16,7 @@ use std::{
     fmt,
     fmt::{Display, Formatter},
 };
-use tonic::Status;
+use tonic::{Status, transport::Channel};
 use types::{TransactionProto, TransactionsClient};
 
 pub mod narwhal {
@@ -24,11 +24,12 @@ pub mod narwhal {
     tonic::include_proto!("narwhal");
 }
 use node::blockchain::{Block, ExecutionError, Transaction as ChainTx};
+use std::{thread, time::Duration};
 
 // Assumption that each transaction costs 1 gas to complete
 // Chose this number because it allows demo to complete round + get extra collections when proposing block.
-const BLOCK_GAS_LIMIT: u32 = 100_000;
-const LEVELS_PER_BLOCK: u64 = 2;
+const BLOCK_GAS_LIMIT: u32 = 200_000;
+// const ROUNDS_PER_BLOCK: u64 = 2;
 const RE_ADD_TXS: bool = false;
 
 #[tokio::main]
@@ -58,6 +59,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .long("client-index")
                         .help("The client number")
                         .min_values(1),
+                )
+                .arg(
+                    Arg::with_name("blocks")
+                        .long("blocks")
+                        .help("Run until reaching this amount of blocks")
+                        .min_values(1),
+                )
+                .arg(
+                    Arg::with_name("rounds-per-block")
+                        .long("rounds-per-block")
+                        .help("Narwhal rounds to create a block")
+                        .min_values(1),
                 ),
         )
         .setting(AppSettings::SubcommandRequiredElseHelp)
@@ -66,6 +79,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut dsts = Vec::new();
     let mut base64_keys = Vec::new();
     let mut client: usize = 0;
+    let mut blocks_to_run: u64 = 1;
+    let mut rounds_per_block: u64 = 1;
     match matches.subcommand() {
         ("run", Some(sub_matches)) => {
             let ports = sub_matches
@@ -86,10 +101,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .value_of("client-index")
                 .expect("Invalid client number specified");
             client = client_aux.parse::<i32>().unwrap() as usize;
+            let blocks_aux = sub_matches
+                .value_of("blocks")
+                .expect("Invalid blocks specified");
+            blocks_to_run = blocks_aux.parse::<u64>().unwrap();
+            let rounds_per_block_aux = sub_matches
+                .value_of("rounds-per-block")
+                .expect("Invalid rounds per block specified");
+            rounds_per_block = rounds_per_block_aux.parse::<u64>().unwrap();
         }
         _ => unreachable!(),
     }
     println!("Client {}!", client);
+    println!("Blocks to run {}!", blocks_to_run);
+    println!("Rounds per block {}!", rounds_per_block);
 
     let mut current_block = Block::genesis(BLOCK_GAS_LIMIT as u32).next();
     let narwhal_nodes = base64_keys.len() as u64;
@@ -106,33 +131,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n1) Retrieve the range of rounds you have a collection for");
     println!("\n\t---- Use Rounds endpoint ----\n");
 
-    // Q: Why is this for a specific validator?
-    let rounds_request = RoundsRequest {
-        public_key: Some(PublicKey {
-            bytes: get_proposer_for_block(0, base64_keys.clone(), narwhal_nodes as u64).clone(),
-        }),
-    };
+    // // Q: Why is this for a specific validator?
+    // let rounds_request = RoundsRequest {
+    //     public_key: Some(PublicKey {
+    //         bytes: get_proposer_for_block(0, base64_keys.clone(), narwhal_nodes as u64).clone(),
+    //     }),
+    // };
 
-    println!("\t{}\n", rounds_request);
+    // println!("\t{}\n", rounds_request);
 
-    let request = tonic::Request::new(rounds_request);
-    let response = proposer_client.rounds(request).await;
-    let rounds_response = response.unwrap().into_inner();
+    // let request = tonic::Request::new(rounds_request);
+    // let response = proposer_client.rounds(request).await;
+    // let rounds_response = response.unwrap().into_inner();
 
-    println!("\t{}\n", rounds_response);
+    // println!("\t{}\n", rounds_response);
 
     // let oldest_round = rounds_response.oldest_round;
-    let newest_round = rounds_response.newest_round;
+    // let newest_round = rounds_response.newest_round;
     // let mut round = oldest_round + 1;
-    let mut round = LEVELS_PER_BLOCK;
+    let mut round = 0;
     // let mut last_completed_round = round;
 
     println!("\n2) Find collections from earliest round and continue to add collections until gas limit is hit\n");
     let mut block_proposal_collection_ids = Vec::new();
     // let mut extra_collections = Vec::new();
-    while round <= newest_round {
+    while round <= (blocks_to_run * rounds_per_block) {
+        let mut max_round;
+        loop {
+            max_round = get_max_round(proposer_client.clone(), current_block.number, base64_keys.clone(), narwhal_nodes).await;
+            // println!("Max round: {}", max_round);
+            if max_round > (current_block.number * rounds_per_block) {
+                break;
+            } else {
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
         let proposer_public_key =
-            get_proposer_for_block(round / LEVELS_PER_BLOCK, base64_keys.clone(), narwhal_nodes);
+           get_proposer_for_block(round / rounds_per_block, base64_keys.clone(), narwhal_nodes);
         // NOTE: Uncomment to have every client getting their collections for each block
         // let proposer_public_key = base64::decode(&base64_keys[client]).unwrap();
         let mut block_full = false;
@@ -250,7 +285,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Re-add AND just the proposer
-        if RE_ADD_TXS && round / LEVELS_PER_BLOCK % narwhal_nodes == (client as u64) {
+        if RE_ADD_TXS && round / rounds_per_block % narwhal_nodes == (client as u64) {
             println!("\n2b2) Adding back failed transactions back to narwhal.\n");
             println!("---- Use TransactionClient.SubmitTransactionStream endpoint ----\n");
             // Connect to the mempool.
@@ -298,10 +333,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         println!("\t\t=====================================================================");
         current_block = current_block.next();
-        round += LEVELS_PER_BLOCK;
+        round += rounds_per_block;
     }
     println!("\n\tEverything it's ok babe!\n");
     Ok(())
+}
+
+async fn get_max_round(proposer_client: ProposerClient<Channel>, block_number: u64, base64_keys: Vec<String>, validators: u64) -> u64 {
+    // Q: Why is this for a specific validator?
+    let rounds_request = RoundsRequest {
+        public_key: Some(PublicKey {
+            bytes: get_proposer_for_block(block_number, base64_keys.clone(), validators).clone(),
+        }),
+    };
+
+    // println!("\t{}\n", rounds_request);
+
+    let request = tonic::Request::new(rounds_request);
+    let response = proposer_client.clone().rounds(request).await;
+    let rounds_response = response.unwrap().into_inner();
+
+    // println!("\t{}\n", rounds_response.newest_round);
+    return rounds_response.newest_round
 }
 
 fn get_proposer_for_block(block_number: u64, base64_keys: Vec<String>, validators: u64) -> Vec<u8> {
@@ -471,8 +524,8 @@ impl Display for RoundsResponse {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let mut result = "**** RoundsResponse ***".to_string();
         result = format!(
-            "{}\n\t|-oldest_round: {}, newest_round: {}",
-            result, &self.oldest_round, &self.newest_round
+            "{}\n\t|-oldest_round: {}, newest_round: XXX",
+            result, &self.oldest_round//, &self.newest_round
         );
 
         write!(f, "{}", result)

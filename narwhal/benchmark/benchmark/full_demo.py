@@ -175,10 +175,13 @@ class Demo:
             for port in port_logs.grpc_ports:
                 print(f'Found port for local grpc server: {port}')
             ports = [int(port) for port in port_logs.grpc_ports]
-            sleep(self.duration)
+            Print.info(f'Amount of blocks {self.blocks_to_run}, rounds per block {self.rounds_per_block}')
+            # sleep(self.duration)
+            # sleep(self.blocks_to_run * (self.rounds_per_block * 0.2) + 5) 
+            sleep(10)
 
             Print.info('Running demo client...')
-            cmd = CommandMaker.run_demo_client(primary_names,  ports, 0)
+            cmd = CommandMaker.run_demo_client(primary_names,  ports, 0, self.blocks_to_run, self.rounds_per_block)
             self.demo_log_path = PathMaker.demo_client_log_file(0)
             self._background_run_with_stdout(cmd, self.demo_log_path)
             # Run without stdout the other clients if necessary
@@ -186,11 +189,13 @@ class Demo:
                 for i in range(len(primary_names)):
                     Print.info(f'Running demo client {i}')
                     if i > 0:
-                        cmd = CommandMaker.run_demo_client(primary_names, ports, i)
+                        cmd = CommandMaker.run_demo_client(primary_names, ports, i, self.blocks_to_run, self.rounds_per_block)
                         log_file = PathMaker.demo_client_log_file(i)
                         self._background_run_with_stdout(cmd, log_file)
             # ironically, it takes a *while* to get data from gRPC
-            sleep(10)
+            seconds_per_round = 1
+            # 5s buffer
+            sleep(self.blocks_to_run * (self.rounds_per_block * seconds_per_round) + 5) 
             self._kill_nodes()
             return self
 
