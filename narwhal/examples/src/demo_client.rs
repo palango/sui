@@ -29,7 +29,7 @@ use node::blockchain::{Block, ExecutionError, Transaction as ChainTx};
 // Chose this number because it allows demo to complete round + get extra collections when proposing block.
 const BLOCK_GAS_LIMIT: u32 = 100_000;
 const LEVELS_PER_BLOCK: u64 = 2;
-const RE_ADD_TXS: bool = false;
+const RE_ADD_TXS: bool = true;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
